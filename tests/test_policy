@@ -1,0 +1,18 @@
+#!/bin/bash
+cargo build || (echo "Failed to build"; exit 1)
+echo "Working: Policy" | ./target/debug/clevis-pin-tpm2 encrypt '{"policy_pubkey_path":"./tests/policy_pubkey.json", "policy_ref": "", "policy_path": "./tests/policy_working.json"}' | ./target/debug/clevis-pin-tpm2 decrypt
+# Negative test (non-valid policy)
+token=$(echo Failed | ./target/debug/clevis-pin-tpm2 encrypt '{"policy_pubkey_path":"./tests/policy_pubkey.json", "policy_ref": "", "policy_path": "./tests/policy_broken.json"}')
+res=$(echo "$token" | ./target/debug/clevis-pin-tpm2 decrypt 2>/dev/null)
+ret=$?
+if [ $ret == 0 -a "$res" == "Failed" ]
+then
+	echo "Managed to decrypt with invalid policy"
+	exit 1
+elif [ $ret == 0 -o "$res" != "" ]
+then
+	echo "Something went wrong"
+	exit 1
+else
+	echo "Working: with policy"
+fi
