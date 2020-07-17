@@ -1185,8 +1185,8 @@ enum PublicKey {
         hashing_algo: HashAlgo,
         exponent: u32,
         #[serde(
-            deserialize_with = "deserialize_as_base64_url_no_pad",
-            serialize_with = "serialize_as_base64_url_no_pad"
+            deserialize_with = "deserialize_as_base64",
+            serialize_with = "serialize_as_base64"
         )]
         modulus: Vec<u8>,
     },
