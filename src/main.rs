@@ -68,6 +68,14 @@ where
         .and_then(|string| base64::decode(&string).map_err(serde::de::Error::custom))
 }
 
+fn tpm_sym_def(_ctx: &mut tss_esapi::Context) -> Result<tss_esapi::tss2_esys::TPMT_SYM_DEF, PinError> {
+    Ok(tss_esapi::tss2_esys::TPMT_SYM_DEF {
+        algorithm: tss_esapi::constants::TPM2_ALG_AES,
+        keyBits: tss_esapi::tss2_esys::TPMU_SYM_KEY_BITS { aes: 128 },
+        mode: tss_esapi::tss2_esys::TPMU_SYM_MODE { aes: tss_esapi::constants::TPM2_ALG_CFB },
+    })
+}
+
 #[derive(Debug)]
 enum PinError {
     Text(&'static str),
@@ -180,12 +188,14 @@ fn create_and_set_tpm2_session(
     ctx: &mut tss_esapi::Context,
     session_type: tss_esapi::tss2_esys::TPM2_SE,
 ) -> Result<ESYS_TR, PinError> {
+    let symdef = tpm_sym_def(ctx)?;
+
     let session = ctx.start_auth_session(
         ESYS_TR_NONE,
         ESYS_TR_NONE,
         &[],
         session_type,
-        utils::TpmtSymDefBuilder::aes_256_cfb(),
+        symdef,
         tss_esapi::constants::TPM2_ALG_SHA256,
     )?;
     let session_attr = utils::TpmaSessionBuilder::new()
@@ -214,12 +224,14 @@ impl TPMPolicyStep {
             tss_esapi::constants::TPM2_SE_POLICY
         };
 
+        let symdef = tpm_sym_def(ctx)?;
+
         let session = ctx.start_auth_session(
             ESYS_TR_NONE,
             ESYS_TR_NONE,
             &[],
             pol_type,
-            utils::TpmtSymDefBuilder::aes_256_cfb(),
+            symdef,
             tss_esapi::constants::TPM2_ALG_SHA256,
         )?;
         let session_attr = utils::TpmaSessionBuilder::new()
