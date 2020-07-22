@@ -16,3 +16,9 @@ Cargo.lock
 
 /target
 #**/*.rs.bk
+
+# Policy test files
+/tests/policy_broken.json
+/tests/policy_working.json
+/tests/privatekey.pem
+/tests/publickey.json

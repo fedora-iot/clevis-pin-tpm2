@@ -1,8 +1,18 @@
 #!/bin/bash
 cargo build || (echo "Failed to build"; exit 1)
-echo "Working: with Policy" | ./target/debug/clevis-pin-tpm2 encrypt '{"policy_pubkey_path":"./tests/policy_pubkey.json", "policy_ref": "", "policy_path": "./tests/policy_working.json"}' | ./target/debug/clevis-pin-tpm2 decrypt
+(
+	cd ../clevis-pin-tpm2-signtool
+	go build
+)
+(
+	cd tests
+	rm -f policy_broken.json policy_working.json privatekey.pem publickey.json
+	../../clevis-pin-tpm2-signtool/clevis-pin-tpm2-signtool <policy_working.yaml >policy_working.json
+	../../clevis-pin-tpm2-signtool/clevis-pin-tpm2-signtool <policy_broken.yaml >policy_broken.json
+)
+echo "Working: with Policy" | ./target/debug/clevis-pin-tpm2 encrypt '{"policy_pubkey_path":"./tests/publickey.json", "policy_ref": "", "policy_path": "./tests/policy_working.json"}' | ./target/debug/clevis-pin-tpm2 decrypt
 # Negative test (non-valid policy)
-token=$(echo Failed | ./target/debug/clevis-pin-tpm2 encrypt '{"policy_pubkey_path":"./tests/policy_pubkey.json", "policy_ref": "", "policy_path": "./tests/policy_broken.json"}')
+token=$(echo Failed | ./target/debug/clevis-pin-tpm2 encrypt '{"policy_pubkey_path":"./tests/publickey.json", "policy_ref": "", "policy_path": "./tests/policy_broken.json"}')
 res=$(echo "$token" | ./target/debug/clevis-pin-tpm2 decrypt 2>&1)
 ret=$?
 if [ $ret == 0 -a "$res" == "Failed" ]

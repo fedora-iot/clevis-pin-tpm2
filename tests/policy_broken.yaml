@@ -1,0 +1,10 @@
+---
+- policy_ref:
+  steps:
+    - PCRs:
+        hash_algorithm: sha256
+        selection:
+          - pcr_id: 21
+            value: "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFE"
+          - pcr_id: 22
+            value: "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF"
