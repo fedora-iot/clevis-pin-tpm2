@@ -5,6 +5,20 @@ use tss_esapi::utils;
 
 use crate::PinError;
 
+pub(super) fn get_key_public(
+    key_type: &str,
+) -> Result<tss_esapi::tss2_esys::TPM2B_PUBLIC, PinError> {
+    match key_type {
+        "ecc" => Ok(create_restricted_ecc_public()),
+        "rsa" => Ok(tss_esapi::utils::create_restricted_decryption_rsa_public(
+            utils::algorithm_specifiers::Cipher::aes_128_cfb(),
+            2048,
+            0,
+        )?),
+        _ => Err(PinError::Text("Unsupported key type used")),
+    }
+}
+
 pub(super) fn create_tpm2b_public_sealed_object(
     policy: Option<tss_esapi::utils::Digest>,
 ) -> Result<tss_esapi::tss2_esys::TPM2B_PUBLIC, PinError> {
@@ -38,7 +52,9 @@ pub(super) fn create_tpm2b_public_sealed_object(
     })
 }
 
-pub(super) fn get_tpm2b_public(val: tss_esapi::tss2_esys::TPM2B_PUBLIC) -> Result<Vec<u8>, PinError> {
+pub(super) fn get_tpm2b_public(
+    val: tss_esapi::tss2_esys::TPM2B_PUBLIC,
+) -> Result<Vec<u8>, PinError> {
     let mut offset = 0 as u64;
     let mut resp = Vec::with_capacity((val.size + 4) as usize);
 
@@ -58,7 +74,9 @@ pub(super) fn get_tpm2b_public(val: tss_esapi::tss2_esys::TPM2B_PUBLIC) -> Resul
     Ok(resp)
 }
 
-pub(super) fn get_tpm2b_private(val: tss_esapi::tss2_esys::TPM2B_PRIVATE) -> Result<Vec<u8>, PinError> {
+pub(super) fn get_tpm2b_private(
+    val: tss_esapi::tss2_esys::TPM2B_PRIVATE,
+) -> Result<Vec<u8>, PinError> {
     let mut offset = 0 as u64;
     let mut resp = Vec::with_capacity((val.size + 4) as usize);
 
@@ -78,7 +96,9 @@ pub(super) fn get_tpm2b_private(val: tss_esapi::tss2_esys::TPM2B_PRIVATE) -> Res
     Ok(resp)
 }
 
-pub(super) fn build_tpm2b_private(val: &[u8]) -> Result<tss_esapi::tss2_esys::TPM2B_PRIVATE, PinError> {
+pub(super) fn build_tpm2b_private(
+    val: &[u8],
+) -> Result<tss_esapi::tss2_esys::TPM2B_PRIVATE, PinError> {
     let mut resp = tss_esapi::tss2_esys::TPM2B_PRIVATE::default();
     let mut offset = 0 as u64;
 
@@ -97,7 +117,9 @@ pub(super) fn build_tpm2b_private(val: &[u8]) -> Result<tss_esapi::tss2_esys::TP
     Ok(resp)
 }
 
-pub(super) fn build_tpm2b_public(val: &[u8]) -> Result<tss_esapi::tss2_esys::TPM2B_PUBLIC, PinError> {
+pub(super) fn build_tpm2b_public(
+    val: &[u8],
+) -> Result<tss_esapi::tss2_esys::TPM2B_PUBLIC, PinError> {
     let mut resp = tss_esapi::tss2_esys::TPM2B_PUBLIC::default();
     let mut offset = 0 as u64;
 

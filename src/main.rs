@@ -15,8 +15,6 @@
 use std::convert::TryFrom;
 use std::error::Error;
 use std::fmt;
-use std::fs;
-use std::str::FromStr;
 
 extern crate atty;
 extern crate base64;
@@ -31,40 +29,15 @@ use std::io::{self, Read, Write};
 use biscuit::jwe;
 use biscuit::CompactJson;
 
-use tss_esapi::tss2_esys::{ESYS_TR, ESYS_TR_NONE, ESYS_TR_RH_OWNER};
-use tss_esapi::utils;
-use tss_esapi::utils::tcti;
-use tss_esapi::Context;
-
 use serde::{Deserialize, Serialize};
 
-use tpm2_policy::{TPMPolicyStep, SignedPolicyList, PublicKey};
+use tpm2_policy::TPMPolicyStep;
 
+mod cli;
 mod tpm_objects;
+mod utils;
 
-fn serialize_as_base64_url_no_pad<S>(bytes: &[u8], serializer: S) -> Result<S::Ok, S::Error>
-where
-    S: serde::Serializer,
-{
-    serializer.serialize_str(&base64::encode_config(bytes, base64::URL_SAFE_NO_PAD))
-}
-
-fn deserialize_as_base64_url_no_pad<'de, D>(deserializer: D) -> Result<Vec<u8>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    String::deserialize(deserializer).and_then(|string| {
-        base64::decode_config(&string, base64::URL_SAFE_NO_PAD).map_err(serde::de::Error::custom)
-    })
-}
-
-fn tpm_sym_def(_ctx: &mut tss_esapi::Context) -> Result<tss_esapi::tss2_esys::TPMT_SYM_DEF, PinError> {
-    Ok(tss_esapi::tss2_esys::TPMT_SYM_DEF {
-        algorithm: tss_esapi::constants::TPM2_ALG_AES,
-        keyBits: tss_esapi::tss2_esys::TPMU_SYM_KEY_BITS { aes: 128 },
-        mode: tss_esapi::tss2_esys::TPMU_SYM_MODE { aes: tss_esapi::constants::TPM2_ALG_CFB },
-    })
-}
+use cli::TPM2Config;
 
 #[derive(Debug)]
 enum PinError {
@@ -168,278 +141,15 @@ impl From<std::str::Utf8Error> for PinError {
     }
 }
 
-fn create_and_set_tpm2_session(
-    ctx: &mut tss_esapi::Context,
-    session_type: tss_esapi::tss2_esys::TPM2_SE,
-) -> Result<ESYS_TR, PinError> {
-    let symdef = tpm_sym_def(ctx)?;
-
-    let session = ctx.start_auth_session(
-        ESYS_TR_NONE,
-        ESYS_TR_NONE,
-        &[],
-        session_type,
-        symdef,
-        tss_esapi::constants::TPM2_ALG_SHA256,
-    )?;
-    let session_attr = tss_esapi::utils::TpmaSessionBuilder::new()
-        .with_flag(tss_esapi::constants::TPMA_SESSION_DECRYPT)
-        .with_flag(tss_esapi::constants::TPMA_SESSION_ENCRYPT)
-        .build();
-
-    ctx.tr_sess_set_attributes(session, session_attr)?;
-
-    ctx.set_sessions((session, ESYS_TR_NONE, ESYS_TR_NONE));
-
-    Ok(session)
-}
-
-#[derive(Serialize, Deserialize, std::fmt::Debug)]
-struct TPM2Config {
-    hash: Option<String>,
-    key: Option<String>,
-    pcr_bank: Option<String>,
-    // PCR IDs can be passed in as comma-separated string or json array
-    pcr_ids: Option<serde_json::Value>,
-    pcr_digest: Option<String>,
-    // Public key (in JSON format) for a wildcard policy that's possibly OR'd with the PCR one
-    policy_pubkey_path: Option<String>,
-    policy_ref: Option<String>,
-    policy_path: Option<String>,
-}
-
-fn get_authorized_policy_step(
-    policy_pubkey_path: &str,
-    policy_path: &Option<String>,
-    policy_ref: &Option<String>,
-) -> Result<TPMPolicyStep, PinError> {
-    let policy_ref = match policy_ref {
-        Some(policy_ref) => policy_ref.as_bytes().to_vec(),
-        None => vec![],
-    };
-
-    let signkey = {
-        let contents = fs::read_to_string(policy_pubkey_path)?;
-        serde_json::from_str::<PublicKey>(&contents)?
-    };
-
-    let policies = match policy_path {
-        None => None,
-        Some(policy_path) => {
-            let contents = fs::read_to_string(policy_path)?;
-            Some(serde_json::from_str::<SignedPolicyList>(&contents)?)
-        }
-    };
-
-    Ok(TPMPolicyStep::Authorized {
-        signkey,
-        policy_ref,
-        policies,
-        next: Box::new(TPMPolicyStep::NoStep),
-    })
-}
-
-impl TryFrom<&TPM2Config> for TPMPolicyStep {
-    type Error = PinError;
-
-    fn try_from(cfg: &TPM2Config) -> Result<Self, PinError> {
-        if cfg.pcr_ids.is_some() && cfg.policy_pubkey_path.is_some() {
-            Ok(TPMPolicyStep::Or([
-                Box::new(TPMPolicyStep::PCRs(
-                    cfg.get_pcr_hash_alg(),
-                    cfg.get_pcr_ids().unwrap(),
-                    Box::new(TPMPolicyStep::NoStep),
-                )),
-                Box::new(get_authorized_policy_step(
-                    cfg.policy_pubkey_path.as_ref().unwrap(),
-                    &None,
-                    &cfg.policy_ref,
-                )?),
-                Box::new(TPMPolicyStep::NoStep),
-                Box::new(TPMPolicyStep::NoStep),
-                Box::new(TPMPolicyStep::NoStep),
-                Box::new(TPMPolicyStep::NoStep),
-                Box::new(TPMPolicyStep::NoStep),
-                Box::new(TPMPolicyStep::NoStep),
-            ]))
-        } else if cfg.pcr_ids.is_some() {
-            Ok(TPMPolicyStep::PCRs(
-                cfg.get_pcr_hash_alg(),
-                cfg.get_pcr_ids().unwrap(),
-                Box::new(TPMPolicyStep::NoStep),
-            ))
-        } else if cfg.policy_pubkey_path.is_some() {
-            get_authorized_policy_step(
-                cfg.policy_pubkey_path.as_ref().unwrap(),
-                &None,
-                &cfg.policy_ref,
-            )
-        } else {
-            Ok(TPMPolicyStep::NoStep)
-        }
-    }
-}
-
-fn get_pcr_hash_alg_from_name(
-    name: Option<&String>,
-) -> tss_esapi::utils::algorithm_specifiers::HashingAlgorithm {
-    match name {
-        None => tss_esapi::utils::algorithm_specifiers::HashingAlgorithm::Sha256,
-        Some(val) => match val.to_lowercase().as_str() {
-            "sha1" => tss_esapi::utils::algorithm_specifiers::HashingAlgorithm::Sha1,
-            "sha256" => tss_esapi::utils::algorithm_specifiers::HashingAlgorithm::Sha256,
-            "sha384" => tss_esapi::utils::algorithm_specifiers::HashingAlgorithm::Sha384,
-            "sha512" => tss_esapi::utils::algorithm_specifiers::HashingAlgorithm::Sha512,
-            _ => panic!(format!("Unsupported hash algo: {:?}", name)),
-        },
-    }
-}
-
-impl TPM2Config {
-    fn get_pcr_hash_alg(&self) -> tss_esapi::utils::algorithm_specifiers::HashingAlgorithm {
-        get_pcr_hash_alg_from_name(self.pcr_bank.as_ref())
-    }
-
-    fn get_pcr_ids(&self) -> Option<Vec<u64>> {
-        match &self.pcr_ids {
-            None => None,
-            Some(serde_json::Value::Array(vals)) => {
-                Some(vals.iter().map(|x| x.as_u64().unwrap()).collect())
-            }
-            _ => panic!("Unexpected type found for pcr_ids"),
-        }
-    }
-
-    fn get_pcr_ids_str(&self) -> Option<String> {
-        match &self.pcr_ids {
-            None => None,
-            Some(serde_json::Value::Array(vals)) => Some(
-                vals.iter()
-                    .map(|x| x.as_u64().unwrap().to_string())
-                    .collect::<Vec<String>>()
-                    .join(","),
-            ),
-            _ => panic!("Unexpected type found for pcr_ids"),
-        }
-    }
-
-    fn normalize(mut self) -> Result<TPM2Config, PinError> {
-        self.normalize_pcr_ids()?;
-        if self.pcr_ids.is_some() && self.pcr_bank.is_none() {
-            self.pcr_bank = Some("sha256".to_string());
-        }
-        if (self.policy_pubkey_path.is_some()
-            || self.policy_path.is_some()
-            || self.policy_ref.is_some())
-            && (self.policy_pubkey_path.is_none()
-                || self.policy_path.is_none()
-                || self.policy_ref.is_none())
-        {
-            return Err(PinError::Text(
-                "Not all of policy pubkey, path and ref are specified",
-            ));
-        }
-        Ok(self)
-    }
-
-    fn normalize_pcr_ids(&mut self) -> Result<(), PinError> {
-        // Normalize pcr_ids from comma-separated string to array
-        if let Some(serde_json::Value::String(val)) = &self.pcr_ids {
-            // Was a string, do a split
-            let newval: Vec<serde_json::Value> = val
-                .split(',')
-                .map(|x| serde_json::Value::String(x.to_string()))
-                .collect();
-            self.pcr_ids = Some(serde_json::Value::Array(newval));
-        }
-        // Normalize pcr_ids from array of Strings to array of Numbers
-        if let Some(serde_json::Value::Array(vals)) = &self.pcr_ids {
-            let newvals: Result<Vec<serde_json::Value>, _> = vals
-                .iter()
-                .map(|x| match x {
-                    serde_json::Value::String(val) => match val.parse::<serde_json::Number>() {
-                        Ok(res) => {
-                            let new = serde_json::Value::Number(res);
-                            if !new.is_u64() {
-                                return Err("Non-positive string int");
-                            }
-                            Ok(new)
-                        }
-                        Err(_) => Err("Unparseable string int"),
-                    },
-                    serde_json::Value::Number(n) => {
-                        let new = serde_json::Value::Number(n.clone());
-                        if !new.is_u64() {
-                            return Err("Non-positive int");
-                        }
-                        Ok(new)
-                    }
-                    _ => Err("Invalid value in pcr_ids"),
-                })
-                .collect();
-            self.pcr_ids = Some(serde_json::Value::Array(newvals?));
-        }
-
-        match &self.pcr_ids {
-            None => Ok(()),
-            // The normalization above would've caught any non-ints
-            Some(serde_json::Value::Array(_)) => Ok(()),
-            _ => Err(PinError::Text("Invalid type")),
-        }
-    }
-}
-
-#[derive(Debug)]
-enum ActionMode {
-    Encrypt,
-    Decrypt,
-    Summary,
-    Help,
-}
-
-fn get_mode_and_cfg(args: &[String]) -> Result<(ActionMode, Option<TPM2Config>), PinError> {
-    if args.len() > 1 && args[1] == "--summary" {
-        return Ok((ActionMode::Summary, None))
-    }
-    if args.len() > 1 && args[1] == "--help" {
-        return Ok((ActionMode::Help, None))
-    }
-    if atty::is(atty::Stream::Stdin) {
-        return Ok((ActionMode::Help, None))
-    }
-    let (mode, cfgstr) = if args[0].contains("encrypt") && args.len() == 2 {
-        (ActionMode::Encrypt, Some(&args[1]))
-    } else if args[0].contains("decrypt") {
-        (ActionMode::Decrypt, None)
-    } else if args.len() > 1 {
-        if args[1] == "encrypt" && args.len() == 3 {
-            (ActionMode::Encrypt, Some(&args[2]))
-        } else if args[1] == "decrypt" {
-            (ActionMode::Decrypt, None)
-        } else {
-            return Err(PinError::NoCommand);
-        }
-    } else {
-        return Err(PinError::NoCommand);
-    };
-
-    let cfg: Option<TPM2Config> = match cfgstr {
-        None => None,
-        Some(cfgstr) => Some(serde_json::from_str::<TPM2Config>(cfgstr)?.normalize()?),
-    };
-
-    Ok((mode, cfg))
-}
-
 fn perform_encrypt(cfg: TPM2Config, input: &str) -> Result<(), PinError> {
     let key_type = match &cfg.key {
         None => "ecc",
         Some(key_type) => key_type,
     };
-    let key_public = get_key_public(&key_type)?;
+    let key_public = tpm_objects::get_key_public(&key_type)?;
 
-    let mut ctx = get_tpm2_ctx()?;
-    let key_handle = get_tpm2_primary_key(&mut ctx, &key_public)?;
+    let mut ctx = utils::get_tpm2_ctx()?;
+    let key_handle = utils::get_tpm2_primary_key(&mut ctx, &key_public)?;
 
     let policy_runner: TPMPolicyStep = TPMPolicyStep::try_from(&cfg)?;
 
@@ -522,13 +232,13 @@ fn perform_encrypt(cfg: TPM2Config, input: &str) -> Result<(), PinError> {
 struct Tpm2Inner {
     hash: String,
     #[serde(
-        deserialize_with = "deserialize_as_base64_url_no_pad",
-        serialize_with = "serialize_as_base64_url_no_pad"
+        deserialize_with = "utils::deserialize_as_base64_url_no_pad",
+        serialize_with = "utils::serialize_as_base64_url_no_pad"
     )]
     jwk_priv: Vec<u8>,
     #[serde(
-        deserialize_with = "deserialize_as_base64_url_no_pad",
-        serialize_with = "serialize_as_base64_url_no_pad"
+        deserialize_with = "utils::deserialize_as_base64_url_no_pad",
+        serialize_with = "utils::serialize_as_base64_url_no_pad"
     )]
     jwk_pub: Vec<u8>,
     key: String,
@@ -567,11 +277,11 @@ impl TryFrom<&Tpm2Inner> for TPMPolicyStep {
         if cfg.pcr_ids.is_some() && cfg.policy_pubkey_path.is_some() {
             Ok(TPMPolicyStep::Or([
                 Box::new(TPMPolicyStep::PCRs(
-                    get_pcr_hash_alg_from_name(cfg.pcr_bank.as_ref()),
+                    utils::get_pcr_hash_alg_from_name(cfg.pcr_bank.as_ref()),
                     cfg.get_pcr_ids().unwrap(),
                     Box::new(TPMPolicyStep::NoStep),
                 )),
-                Box::new(get_authorized_policy_step(
+                Box::new(utils::get_authorized_policy_step(
                     cfg.policy_pubkey_path.as_ref().unwrap(),
                     &cfg.policy_path,
                     &cfg.policy_ref,
@@ -585,12 +295,12 @@ impl TryFrom<&Tpm2Inner> for TPMPolicyStep {
             ]))
         } else if cfg.pcr_ids.is_some() {
             Ok(TPMPolicyStep::PCRs(
-                get_pcr_hash_alg_from_name(cfg.pcr_bank.as_ref()),
+                utils::get_pcr_hash_alg_from_name(cfg.pcr_bank.as_ref()),
                 cfg.get_pcr_ids().unwrap(),
                 Box::new(TPMPolicyStep::NoStep),
             ))
         } else if cfg.policy_pubkey_path.is_some() {
-            get_authorized_policy_step(
+            utils::get_authorized_policy_step(
                 cfg.policy_pubkey_path.as_ref().unwrap(),
                 &cfg.policy_path,
                 &cfg.policy_ref,
@@ -616,18 +326,6 @@ impl CompactJson for Tpm2Inner {}
 impl CompactJson for ClevisHeader {}
 impl CompactJson for ClevisInner {}
 
-fn get_key_public(key_type: &str) -> Result<tss_esapi::tss2_esys::TPM2B_PUBLIC, PinError> {
-    match key_type {
-        "ecc" => Ok(tpm_objects::create_restricted_ecc_public()),
-        "rsa" => Ok(tss_esapi::utils::create_restricted_decryption_rsa_public(
-            utils::algorithm_specifiers::Cipher::aes_128_cfb(),
-            2048,
-            0,
-        )?),
-        _ => Err(PinError::Text("Unsupported key type used")),
-    }
-}
-
 fn perform_decrypt(input: &str) -> Result<(), PinError> {
     let token = biscuit::Compact::decode(input.trim());
     let hdr: biscuit::jwe::Header<ClevisHeader> = token.part(0)?;
@@ -641,12 +339,12 @@ fn perform_decrypt(input: &str) -> Result<(), PinError> {
 
     let policy = TPMPolicyStep::try_from(&hdr.private.clevis.tpm2)?;
 
-    let key_public = get_key_public(hdr.private.clevis.tpm2.key.as_str())?;
+    let key_public = tpm_objects::get_key_public(hdr.private.clevis.tpm2.key.as_str())?;
 
-    let mut ctx = get_tpm2_ctx()?;
-    let key_handle = get_tpm2_primary_key(&mut ctx, &key_public)?;
+    let mut ctx = utils::get_tpm2_ctx()?;
+    let key_handle = utils::get_tpm2_primary_key(&mut ctx, &key_public)?;
 
-    create_and_set_tpm2_session(&mut ctx, tss_esapi::constants::TPM2_SE_HMAC)?;
+    utils::create_and_set_tpm2_session(&mut ctx, tss_esapi::constants::TPM2_SE_HMAC)?;
     let key = ctx.load(key_handle, jwkpriv, jwkpub)?;
 
     policy.send_policy(&mut ctx, false)?;
@@ -685,7 +383,8 @@ fn print_summary() {
 }
 
 fn print_help() {
-    eprintln!("
+    eprintln!(
+        "
 Usage: clevis encrypt tpm2 CONFIG < PLAINTEXT > JWE
 
 Encrypts using a TPM2.0 chip binding policy
@@ -705,14 +404,15 @@ This command uses the following configuration properties:
   policy_ref: <string>  Reference to search for in signed policy file
 
   policy_path: <string>  Path to the policy path to search for decryption policy
-");
+"
+    );
 
     std::process::exit(2);
 }
 
 fn main() {
     let args: Vec<String> = env::args().collect();
-    let (mode, cfg) = match get_mode_and_cfg(&args) {
+    let (mode, cfg) = match cli::get_mode_and_cfg(&args) {
         Err(e) => {
             eprintln!("Error during parsing operation: {}", e);
             std::process::exit(1);
@@ -721,9 +421,9 @@ fn main() {
     };
 
     match mode {
-        ActionMode::Summary => return print_summary(),
-        ActionMode::Help => return print_help(),
-        _ => {},
+        cli::ActionMode::Summary => return print_summary(),
+        cli::ActionMode::Help => return print_help(),
+        _ => {}
     };
 
     let input = match read_input_token() {
@@ -735,57 +435,12 @@ fn main() {
     };
 
     if let Err(e) = match mode {
-        ActionMode::Encrypt => perform_encrypt(cfg.unwrap(), &input),
-        ActionMode::Decrypt => perform_decrypt(&input),
-        ActionMode::Summary => panic!("Summary was already handled supposedly"),
-        ActionMode::Help => panic!("Help was already handled supposedly"),
+        cli::ActionMode::Encrypt => perform_encrypt(cfg.unwrap(), &input),
+        cli::ActionMode::Decrypt => perform_decrypt(&input),
+        cli::ActionMode::Summary => panic!("Summary was already handled supposedly"),
+        cli::ActionMode::Help => panic!("Help was already handled supposedly"),
     } {
         eprintln!("Error executing command: {}", e);
         std::process::exit(2);
     }
-}
-
-fn get_tpm2_ctx() -> Result<Context, tss_esapi::response_code::Error> {
-    unsafe {
-        Context::new(tcti::Tcti::Device(
-            tcti::DeviceConfig::from_str(
-                if std::path::Path::new("/dev/tpmrm0").exists() {
-                    "/dev/tpmrm0"
-                } else {
-                    "/dev/tpm0"
-                }
-            )?
-        ))
-    }
-}
-
-fn perform_with_other_sessions<T, E, F>(ctx: &mut Context, sestype: tss_esapi::tss2_esys::TPM2_SE, f: F) -> Result<T, E>
-where
-    F: Fn(&mut Context) -> Result<T, E>,
-    E: From<tss_esapi::response_code::Error> + From<PinError>
-{
-    let oldses = ctx.sessions();
-
-    let res = create_and_set_tpm2_session(ctx, sestype);
-    if res.is_err() {
-        ctx.set_sessions(oldses);
-        ctx.flush_context(ctx.sessions().0)?;
-        res?;
-    }
-
-    let res = f(ctx);
-
-    ctx.flush_context(ctx.sessions().0)?;
-
-    ctx.set_sessions(oldses);
-
-    res
-}
-
-fn get_tpm2_primary_key(
-    ctx: &mut Context,
-    pub_template: &tss_esapi::tss2_esys::TPM2B_PUBLIC,
-) -> Result<ESYS_TR, PinError> {
-    perform_with_other_sessions(ctx, tss_esapi::constants::TPM2_SE_HMAC,
-        |ctx| ctx.create_primary_key(ESYS_TR_RH_OWNER, pub_template, &[], &[], &[], &[]).map_err(|e| e.into()))
 }
