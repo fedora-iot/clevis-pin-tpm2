@@ -9,6 +9,10 @@ echo "Working: with PCRs (clevis encrypt)" | clevis encrypt tpm2 '{"pcr_ids":[23
 echo "Working: with PCRs sha1" | ./target/debug/clevis-pin-tpm2 encrypt '{"pcr_bank": "sha1", "pcr_ids":[23]}' | ./target/debug/clevis-pin-tpm2 decrypt || (echo "Failed: with PCRs"; exit 1)
 echo "Working: with PCRs sha1 (clevis decrypt)" | ./target/debug/clevis-pin-tpm2 encrypt '{"pcr_bank": "sha1", "pcr_ids":[23]}' | clevis decrypt || (echo "Failed: with PCRs"; exit 1)
 echo "Working: with PCRs sha1 (clevis encrypt)" | clevis encrypt tpm2 '{"pcr_bank": "sha1", "pcr_ids":[23]}' | ./target/debug/clevis-pin-tpm2 decrypt || (echo "Failed: with PCRs"; exit 1)
+echo "Working: with PCRs rsa" | ./target/debug/clevis-pin-tpm2 encrypt '{"key": "rsa"}' | ./target/debug/clevis-pin-tpm2 decrypt || (echo "Failed: with PCRs"; exit 1)
+echo "Working: with PCRs rsa (clevis decrypt)" | ./target/debug/clevis-pin-tpm2 encrypt '{"key": "rsa"}' | clevis decrypt || (echo "Failed: with PCRs"; exit 1)
+echo "Working: with PCRs rsa (clevis encrypt)" | clevis encrypt tpm2 '{"key": "rsa"}' | ./target/debug/clevis-pin-tpm2 decrypt || (echo "Failed: with PCRs"; exit 1)
+
 # Negative test (PCR change)
 token=$(echo Failed | ./target/debug/clevis-pin-tpm2 encrypt '{"pcr_ids":[23]}')
 tpm2_pcrevent -Q README.md 23
