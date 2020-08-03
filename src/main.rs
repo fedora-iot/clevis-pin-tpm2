@@ -17,6 +17,7 @@ use std::error::Error;
 use std::fmt;
 use std::fs;
 
+extern crate atty;
 extern crate base64;
 extern crate biscuit;
 extern crate serde;
@@ -720,15 +721,21 @@ impl TPM2Config {
     }
 }
 
-// if ! tpm2_createprimary -Q -H "$auth" -g "$hash" -G "$key" -C "$TMP"/primary.context; then
-
 #[derive(Debug)]
 enum ActionMode {
     Encrypt,
     Decrypt,
+    Summary,
+    Help,
 }
 
 fn get_mode_and_cfg(args: &[String]) -> Result<(ActionMode, Option<TPM2Config>), PinError> {
+    if args.len() > 1 && args[1] == "--summary" {
+        return Ok((ActionMode::Summary, None))
+    }
+    if atty::is(atty::Stream::Stdin) {
+        return Ok((ActionMode::Help, None))
+    }
     let (mode, cfgstr) = if args[0].contains("encrypt") && args.len() == 2 {
         (ActionMode::Encrypt, Some(&args[1]))
     } else if args[0].contains("decrypt") {
@@ -1304,6 +1311,36 @@ fn read_input_token() -> Result<String, PinError> {
     Ok(buffer)
 }
 
+fn print_summary() {
+    println!("Encrypts using a TPM2.0 chip binding policy");
+}
+
+fn print_help() {
+    eprintln!("
+Usage: clevis encrypt tpm2 CONFIG < PLAINTEXT > JWE
+
+Encrypts using a TPM2.0 chip binding policy
+
+This command uses the following configuration properties:
+
+  hash: <string>  Hash algorithm used in the computation of the object name (default: sha256)
+
+  key: <string>  Algorithm type for the generated key (options: eecc, rsa; default: ecc)
+
+  pcr_bank: <string>  PCR algorithm bank to use for policy (default: sha256)
+
+  pcr_ids: <string>  PCR list used for policy. If not present, no PCR policy is used
+
+  policy_pubkey_path: <string>  Path to the policy public key for authorized policy decryption
+
+  policy_ref: <string>  Reference to search for in signed policy file
+
+  policy_path: <string>  Path to the policy path to search for decryption policy
+");
+
+    std::process::exit(2);
+}
+
 fn main() {
     let args: Vec<String> = env::args().collect();
     let (mode, cfg) = match get_mode_and_cfg(&args) {
@@ -1312,6 +1349,12 @@ fn main() {
             std::process::exit(1);
         }
         Ok((mode, cfg)) => (mode, cfg),
+    };
+
+    match mode {
+        ActionMode::Summary => return print_summary(),
+        ActionMode::Help => return print_help(),
+        _ => {},
     };
 
     let input = match read_input_token() {
@@ -1325,6 +1368,8 @@ fn main() {
     if let Err(e) = match mode {
         ActionMode::Encrypt => perform_encrypt(cfg.unwrap(), &input),
         ActionMode::Decrypt => perform_decrypt(&input),
+        ActionMode::Summary => panic!("Summary was already handled supposedly"),
+        ActionMode::Help => panic!("Help was already handled supposedly"),
     } {
         eprintln!("Error executing command: {}", e);
         std::process::exit(2);
