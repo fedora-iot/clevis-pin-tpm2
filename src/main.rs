@@ -733,6 +733,9 @@ fn get_mode_and_cfg(args: &[String]) -> Result<(ActionMode, Option<TPM2Config>),
     if args.len() > 1 && args[1] == "--summary" {
         return Ok((ActionMode::Summary, None))
     }
+    if args.len() > 1 && args[1] == "--help" {
+        return Ok((ActionMode::Help, None))
+    }
     if atty::is(atty::Stream::Stdin) {
         return Ok((ActionMode::Help, None))
     }
