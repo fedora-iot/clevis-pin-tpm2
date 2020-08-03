@@ -1377,7 +1377,11 @@ fn main() {
 }
 
 fn get_tpm2_ctx() -> Result<Context, tss_esapi::response_code::Error> {
-    unsafe { Context::new(tcti::Tcti::Tabrmd(Default::default())) }
+    if std::path::Path::new("/dev/tpmrm0").exists() {
+        unsafe { Context::new(tcti::Tcti::Tabrmd(Default::default())) }
+    } else {
+        unsafe { Context::new(tcti::Tcti::Device(Default::default())) }
+    }
 }
 
 fn get_tpm2_primary_key(
