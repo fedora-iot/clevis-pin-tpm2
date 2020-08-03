@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::convert::{TryFrom, TryInto};
+use std::convert::TryFrom;
 use std::error::Error;
 use std::fmt;
 use std::fs;
@@ -38,35 +38,22 @@ use tss_esapi::Context;
 
 use serde::{Deserialize, Serialize};
 
-pub fn serialize_as_base64_url_no_pad<S>(bytes: &[u8], serializer: S) -> Result<S::Ok, S::Error>
+use tpm2_policy::{TPMPolicyStep, SignedPolicyList, PublicKey};
+
+fn serialize_as_base64_url_no_pad<S>(bytes: &[u8], serializer: S) -> Result<S::Ok, S::Error>
 where
     S: serde::Serializer,
 {
     serializer.serialize_str(&base64::encode_config(bytes, base64::URL_SAFE_NO_PAD))
 }
 
-pub fn deserialize_as_base64_url_no_pad<'de, D>(deserializer: D) -> Result<Vec<u8>, D::Error>
+fn deserialize_as_base64_url_no_pad<'de, D>(deserializer: D) -> Result<Vec<u8>, D::Error>
 where
     D: serde::Deserializer<'de>,
 {
     String::deserialize(deserializer).and_then(|string| {
         base64::decode_config(&string, base64::URL_SAFE_NO_PAD).map_err(serde::de::Error::custom)
     })
-}
-
-pub fn serialize_as_base64<S>(bytes: &[u8], serializer: S) -> Result<S::Ok, S::Error>
-where
-    S: serde::Serializer,
-{
-    serializer.serialize_str(&base64::encode(bytes))
-}
-
-pub fn deserialize_as_base64<'de, D>(deserializer: D) -> Result<Vec<u8>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    String::deserialize(deserializer)
-        .and_then(|string| base64::decode(&string).map_err(serde::de::Error::custom))
 }
 
 fn tpm_sym_def(_ctx: &mut tss_esapi::Context) -> Result<tss_esapi::tss2_esys::TPMT_SYM_DEF, PinError> {
@@ -87,6 +74,7 @@ enum PinError {
     JWE(biscuit::errors::Error),
     Base64Decoding(base64::DecodeError),
     Utf8(std::str::Utf8Error),
+    PolicyError(tpm2_policy::Error),
 }
 
 impl PinError {}
@@ -120,11 +108,27 @@ impl fmt::Display for PinError {
                 err.fmt(f)
             }
             PinError::NoCommand => write!(f, "No command provided"),
+            PinError::PolicyError(err) => {
+                write!(f, "Policy Error: ")?;
+                err.fmt(f)
+            }
         }
     }
 }
 
 impl Error for PinError {}
+
+impl From<std::io::Error> for PinError {
+    fn from(err: std::io::Error) -> Self {
+        PinError::IO(err)
+    }
+}
+
+impl From<tpm2_policy::Error> for PinError {
+    fn from(err: tpm2_policy::Error) -> Self {
+        PinError::PolicyError(err)
+    }
+}
 
 impl From<&'static str> for PinError {
     fn from(err: &'static str) -> Self {
@@ -135,12 +139,6 @@ impl From<&'static str> for PinError {
 impl From<serde_json::Error> for PinError {
     fn from(err: serde_json::Error) -> Self {
         PinError::Serde(err)
-    }
-}
-
-impl From<std::io::Error> for PinError {
-    fn from(err: std::io::Error) -> Self {
-        PinError::IO(err)
     }
 }
 
@@ -168,23 +166,6 @@ impl From<std::str::Utf8Error> for PinError {
     }
 }
 
-#[derive(Debug)]
-enum TPMPolicyStep {
-    NoStep,
-    PCRs(
-        tss_esapi::utils::algorithm_specifiers::HashingAlgorithm,
-        Vec<u64>,
-        Box<TPMPolicyStep>,
-    ),
-    Authorized {
-        signkey: PublicKey,
-        policy_ref: Vec<u8>,
-        policies: Option<SignedPolicyList>,
-        next: Box<TPMPolicyStep>,
-    },
-    Or([Box<TPMPolicyStep>; 8]),
-}
-
 fn create_and_set_tpm2_session(
     ctx: &mut tss_esapi::Context,
     session_type: tss_esapi::tss2_esys::TPM2_SE,
@@ -199,7 +180,7 @@ fn create_and_set_tpm2_session(
         symdef,
         tss_esapi::constants::TPM2_ALG_SHA256,
     )?;
-    let session_attr = utils::TpmaSessionBuilder::new()
+    let session_attr = tss_esapi::utils::TpmaSessionBuilder::new()
         .with_flag(tss_esapi::constants::TPMA_SESSION_DECRYPT)
         .with_flag(tss_esapi::constants::TPMA_SESSION_ENCRYPT)
         .build();
@@ -209,275 +190,6 @@ fn create_and_set_tpm2_session(
     ctx.set_sessions((session, ESYS_TR_NONE, ESYS_TR_NONE));
 
     Ok(session)
-}
-
-impl TPMPolicyStep {
-    /// Sends the generate policy to the TPM2, and sets the authorized policy as active
-    /// Returns the policy_digest for authInfo
-    fn send_policy(
-        self,
-        ctx: &mut tss_esapi::Context,
-        trial_policy: bool,
-    ) -> Result<Option<tss_esapi::utils::Digest>, PinError> {
-        let pol_type = if trial_policy {
-            tss_esapi::constants::TPM2_SE_TRIAL
-        } else {
-            tss_esapi::constants::TPM2_SE_POLICY
-        };
-
-        let symdef = tpm_sym_def(ctx)?;
-
-        let session = ctx.start_auth_session(
-            ESYS_TR_NONE,
-            ESYS_TR_NONE,
-            &[],
-            pol_type,
-            symdef,
-            tss_esapi::constants::TPM2_ALG_SHA256,
-        )?;
-        let session_attr = utils::TpmaSessionBuilder::new()
-            .with_flag(tss_esapi::constants::TPMA_SESSION_DECRYPT)
-            .with_flag(tss_esapi::constants::TPMA_SESSION_ENCRYPT)
-            .build();
-        ctx.tr_sess_set_attributes(session, session_attr)?;
-
-        match self {
-            TPMPolicyStep::NoStep => {
-                create_and_set_tpm2_session(ctx, tss_esapi::constants::TPM2_SE_HMAC)?;
-                Ok(None)
-            }
-            _ => {
-                self._send_policy(ctx, session)?;
-
-                let pol_digest = ctx.policy_get_digest(session)?;
-
-                if trial_policy {
-                    create_and_set_tpm2_session(ctx, tss_esapi::constants::TPM2_SE_HMAC)?;
-                } else {
-                    ctx.set_sessions((session, ESYS_TR_NONE, ESYS_TR_NONE));
-                }
-                Ok(Some(pol_digest))
-            }
-        }
-    }
-
-    fn _send_policy(
-        self,
-        ctx: &mut tss_esapi::Context,
-        policy_session: tss_esapi::tss2_esys::ESYS_TR,
-    ) -> Result<(), PinError> {
-        match self {
-            TPMPolicyStep::NoStep => Ok(()),
-
-            TPMPolicyStep::PCRs(pcr_hash_alg, pcr_ids, next) => {
-                let pcr_ids: Result<Vec<tss_esapi::utils::PcrSlot>, PinError> =
-                    pcr_ids.iter().map(|x| pcr_id_to_slot(x)).collect();
-                let pcr_ids: Vec<tss_esapi::utils::PcrSlot> = pcr_ids?;
-
-                let pcr_sel = tss_esapi::utils::PcrSelectionsBuilder::new()
-                    .with_selection(pcr_hash_alg, &pcr_ids)
-                    .build();
-
-                // Ensure PCR reading occurs with no sessions (we don't use audit sessions)
-                let old_ses = ctx.sessions();
-                ctx.set_sessions((ESYS_TR_NONE, ESYS_TR_NONE, ESYS_TR_NONE));
-                let (_update_counter, pcr_sel, pcr_data) = ctx.pcr_read(pcr_sel)?;
-                ctx.set_sessions(old_ses);
-
-                let concatenated_pcr_values: Vec<&[u8]> = pcr_ids
-                    .iter()
-                    .map(|x| {
-                        pcr_data
-                            .pcr_bank(pcr_hash_alg)
-                            .unwrap()
-                            .pcr_value(*x)
-                            .unwrap()
-                            .value()
-                    })
-                    .collect();
-                let concatenated_pcr_values = concatenated_pcr_values.as_slice().concat();
-
-                let (hashed_data, _ticket) = ctx.hash(
-                    &concatenated_pcr_values,
-                    tss_esapi::utils::algorithm_specifiers::HashingAlgorithm::Sha256,
-                    tss_esapi::utils::Hierarchy::Owner,
-                )?;
-
-                ctx.policy_pcr(policy_session, &hashed_data, pcr_sel)?;
-                next._send_policy(ctx, policy_session)
-            }
-
-            TPMPolicyStep::Authorized {
-                signkey,
-                policy_ref,
-                policies,
-                next,
-            } => {
-                let policy_ref = tss_esapi::utils::Digest::try_from(policy_ref)?;
-
-                let tpm_signkey = tss_esapi::tss2_esys::TPM2B_PUBLIC::try_from(&signkey)?;
-                let loaded_key =
-                    ctx.load_external_public(&tpm_signkey, tss_esapi::utils::Hierarchy::Owner)?;
-                let loaded_key_name = ctx.tr_get_name(loaded_key)?;
-
-                let (approved_policy, check_ticket) = match policies {
-                    None => {
-                        /* Some TPMs don't seem to like the Null ticket.. Let's just use a dummy
-                        let null_ticket = tss_esapi::tss2_esys::TPMT_TK_VERIFIED {
-                            tag: tss_esapi::constants::TPM2_ST_VERIFIED,
-                            hierarchy: tss_esapi::tss2_esys::ESYS_TR_RH_NULL,
-                            digest: tss_esapi::tss2_esys::TPM2B_DIGEST {
-                                size: 32,
-                                buffer: [0; 64],
-                            },
-                        };
-                        */
-                        let dummy_ticket = get_dummy_ticket(ctx);
-                        (tss_esapi::utils::Digest::try_from(vec![])?, dummy_ticket)
-                    }
-                    Some(policies) => find_and_play_applicable_policy(
-                        ctx,
-                        &policies,
-                        policy_session,
-                        policy_ref.value(),
-                        signkey.get_signing_scheme(),
-                        loaded_key,
-                    )?,
-                };
-
-                ctx.policy_authorize(
-                    policy_session,
-                    approved_policy,
-                    tss_esapi::tss2_esys::TPM2B_DIGEST::try_from(policy_ref)?,
-                    loaded_key_name,
-                    check_ticket,
-                )?;
-
-                next._send_policy(ctx, policy_session)
-            }
-
-            _ => Err(PinError::Text("Policy not implemented")),
-        }
-    }
-}
-
-fn find_and_play_applicable_policy(
-    ctx: &mut tss_esapi::Context,
-    policies: &[SignedPolicy],
-    policy_session: ESYS_TR,
-    policy_ref: &[u8],
-    scheme: utils::AsymSchemeUnion,
-    loaded_key: ESYS_TR,
-) -> Result<
-    (
-        tss_esapi::utils::Digest,
-        tss_esapi::tss2_esys::TPMT_TK_VERIFIED,
-    ),
-    PinError,
-> {
-    for policy in policies {
-        if policy.policy_ref != policy_ref {
-            continue;
-        }
-
-        if let Some(policy_digest) = play_policy(ctx, &policy, policy_session)? {
-            // aHash ≔ H_{aHashAlg}(approvedPolicy || policyRef)
-            let mut ahash = Vec::new();
-            ahash.write_all(&policy_digest)?;
-            ahash.write_all(&policy_ref)?;
-
-            let ahash = ctx
-                .hash(
-                    &ahash,
-                    tss_esapi::utils::algorithm_specifiers::HashingAlgorithm::Sha256,
-                    tss_esapi::utils::Hierarchy::Null,
-                )?
-                .0;
-            let signature = tss_esapi::utils::Signature {
-                scheme,
-                signature: tss_esapi::utils::SignatureData::RsaSignature(policy.signature.clone()),
-            };
-            let tkt = ctx.verify_signature(loaded_key, &ahash, &signature.try_into()?)?;
-
-            return Ok((policy_digest, tkt));
-        }
-    }
-
-    Err(PinError::Text("No matching authorized policy found"))
-}
-
-// This function would do a simple check whether the policy has a chance for success.
-// It does explicitly not change policy_session
-fn check_policy_feasibility(_ctx: &mut tss_esapi::Context, _policy: &SignedPolicy) -> Result<bool,PinError> {
-    Ok(true)
-    // TODO: Implement this, to check whether the PCRs in this branch would match
-}
-
-fn play_policy(
-    ctx: &mut tss_esapi::Context,
-    policy: &SignedPolicy,
-    policy_session: ESYS_TR,
-) -> Result<Option<tss_esapi::utils::Digest>, PinError> {
-    if !check_policy_feasibility(ctx, policy)? {
-        return Ok(None)
-    }
-
-    for step in &policy.steps {
-        let tpmstep = TPMPolicyStep::try_from(step)?;
-        tpmstep._send_policy(ctx, policy_session)?;
-    }
-
-    Ok(Some(ctx.policy_get_digest(policy_session)?))
-}
-
-// It turns out that a Null ticket does not work for some TPMs, so let's just generate
-// a dummy ticket. This is a valid ticket, but over a totally useless piece of data.
-fn get_dummy_ticket(context: &mut tss_esapi::Context) -> tss_esapi::tss2_esys::TPMT_TK_VERIFIED {
-    let old_ses = context.sessions();
-    context.set_sessions((ESYS_TR_NONE, ESYS_TR_NONE, ESYS_TR_NONE));
-    create_and_set_tpm2_session(context, tss_esapi::constants::TPM2_SE_HMAC).unwrap();
-
-    let signing_key_pub = utils::create_unrestricted_signing_rsa_public(
-        tss_esapi::utils::AsymSchemeUnion::RSASSA(
-            tss_esapi::utils::algorithm_specifiers::HashingAlgorithm::Sha256,
-        ),
-        2048,
-        0,
-    )
-    .unwrap();
-
-    let key_handle = context
-        .create_primary_key(ESYS_TR_RH_OWNER, &signing_key_pub, &[], &[], &[], &[])
-        .unwrap();
-    let ahash = context
-        .hash(
-            &[0x1, 0x2],
-            tss_esapi::utils::algorithm_specifiers::HashingAlgorithm::Sha256,
-            tss_esapi::utils::Hierarchy::Null,
-        )
-        .unwrap()
-        .0;
-
-    let scheme = tss_esapi::tss2_esys::TPMT_SIG_SCHEME {
-        scheme: tss_esapi::constants::TPM2_ALG_NULL,
-        details: Default::default(),
-    };
-    let validation = tss_esapi::tss2_esys::TPMT_TK_HASHCHECK {
-        tag: tss_esapi::constants::TPM2_ST_HASHCHECK,
-        hierarchy: tss_esapi::constants::TPM2_RH_NULL,
-        digest: Default::default(),
-    };
-    // A signature over just the policy_digest, since the policy_ref is empty
-    let signature = context
-        .sign(key_handle, &ahash, scheme, &validation)
-        .unwrap();
-    let tkt = context
-        .verify_signature(key_handle, &ahash, &signature.try_into().unwrap())
-        .unwrap();
-
-    context.set_sessions(old_ses);
-
-    tkt
 }
 
 #[derive(Serialize, Deserialize, std::fmt::Debug)]
@@ -525,22 +237,6 @@ fn get_authorized_policy_step(
     })
 }
 
-impl TryFrom<&SignedPolicyStep> for TPMPolicyStep {
-    type Error = PinError;
-
-    fn try_from(spolicy: &SignedPolicyStep) -> Result<Self, PinError> {
-        match spolicy {
-            SignedPolicyStep::PCRs{pcr_ids, hash_algorithm, value: _} => {
-                Ok(TPMPolicyStep::PCRs(
-                    get_pcr_hash_alg_from_name(Some(&hash_algorithm)),
-                    pcr_ids.iter().map(|x| *x as u64).collect(),
-                    Box::new(TPMPolicyStep::NoStep),
-                ))
-            },
-        }
-    }
-}
-
 impl TryFrom<&TPM2Config> for TPMPolicyStep {
     type Error = PinError;
 
@@ -579,36 +275,6 @@ impl TryFrom<&TPM2Config> for TPMPolicyStep {
         } else {
             Ok(TPMPolicyStep::NoStep)
         }
-    }
-}
-
-fn pcr_id_to_slot(pcr: &u64) -> Result<tss_esapi::utils::PcrSlot, PinError> {
-    match pcr {
-        0 => Ok(tss_esapi::utils::PcrSlot::Slot0),
-        1 => Ok(tss_esapi::utils::PcrSlot::Slot1),
-        2 => Ok(tss_esapi::utils::PcrSlot::Slot2),
-        3 => Ok(tss_esapi::utils::PcrSlot::Slot3),
-        4 => Ok(tss_esapi::utils::PcrSlot::Slot4),
-        5 => Ok(tss_esapi::utils::PcrSlot::Slot5),
-        6 => Ok(tss_esapi::utils::PcrSlot::Slot6),
-        7 => Ok(tss_esapi::utils::PcrSlot::Slot7),
-        8 => Ok(tss_esapi::utils::PcrSlot::Slot8),
-        9 => Ok(tss_esapi::utils::PcrSlot::Slot9),
-        10 => Ok(tss_esapi::utils::PcrSlot::Slot10),
-        11 => Ok(tss_esapi::utils::PcrSlot::Slot11),
-        12 => Ok(tss_esapi::utils::PcrSlot::Slot12),
-        13 => Ok(tss_esapi::utils::PcrSlot::Slot13),
-        14 => Ok(tss_esapi::utils::PcrSlot::Slot14),
-        15 => Ok(tss_esapi::utils::PcrSlot::Slot15),
-        16 => Ok(tss_esapi::utils::PcrSlot::Slot16),
-        17 => Ok(tss_esapi::utils::PcrSlot::Slot17),
-        18 => Ok(tss_esapi::utils::PcrSlot::Slot18),
-        19 => Ok(tss_esapi::utils::PcrSlot::Slot19),
-        20 => Ok(tss_esapi::utils::PcrSlot::Slot20),
-        21 => Ok(tss_esapi::utils::PcrSlot::Slot21),
-        22 => Ok(tss_esapi::utils::PcrSlot::Slot22),
-        23 => Ok(tss_esapi::utils::PcrSlot::Slot23),
-        _ => Err(PinError::Text("Invalid PCR slot requested")),
     }
 }
 
@@ -1093,172 +759,6 @@ fn get_key_public(key_type: &str) -> Result<tss_esapi::tss2_esys::TPM2B_PUBLIC, 
             0,
         )?),
         _ => Err(PinError::Text("Unsupported key type used")),
-    }
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-enum SignedPolicyStep {
-    PCRs {
-        pcr_ids: Vec<u16>,
-        hash_algorithm: String,
-        #[serde(
-            deserialize_with = "deserialize_as_base64",
-            serialize_with = "serialize_as_base64"
-        )]
-        value: Vec<u8>,
-    },
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct SignedPolicy {
-    // policy_ref contains the policy_ref used in the aHash, used to determine the policy to use from a list
-    #[serde(
-        deserialize_with = "deserialize_as_base64",
-        serialize_with = "serialize_as_base64"
-    )]
-    policy_ref: Vec<u8>,
-    // steps contains the policy steps that are signed
-    steps: Vec<SignedPolicyStep>,
-    // signature contains the signature over aHash
-    #[serde(
-        deserialize_with = "deserialize_as_base64",
-        serialize_with = "serialize_as_base64"
-    )]
-    signature: Vec<u8>,
-}
-
-type SignedPolicyList = Vec<SignedPolicy>;
-
-#[derive(Debug, Serialize, Deserialize)]
-enum RSAPublicKeyScheme {
-    RSAPSS,
-    RSASSA,
-}
-
-impl RSAPublicKeyScheme {
-    fn to_scheme(&self, hash_algo: &HashAlgo) -> tss_esapi::utils::AsymSchemeUnion {
-        match self {
-            RSAPublicKeyScheme::RSAPSS => {
-                tss_esapi::utils::AsymSchemeUnion::RSAPSS(hash_algo.into())
-            }
-            RSAPublicKeyScheme::RSASSA => {
-                tss_esapi::utils::AsymSchemeUnion::RSASSA(hash_algo.into())
-            }
-        }
-    }
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub enum HashAlgo {
-    SHA1,
-    SHA256,
-    SHA384,
-    SHA512,
-    SM3_256,
-    SHA3_256,
-    SHA3_384,
-    SHA3_512,
-}
-
-impl HashAlgo {
-    fn to_tpmi_alg_hash(&self) -> tss_esapi::tss2_esys::TPMI_ALG_HASH {
-        let alg: tss_esapi::utils::algorithm_specifiers::HashingAlgorithm = self.into();
-        alg.into()
-    }
-}
-
-impl From<&HashAlgo> for tss_esapi::utils::algorithm_specifiers::HashingAlgorithm {
-    fn from(halg: &HashAlgo) -> Self {
-        match halg {
-            HashAlgo::SHA1 => tss_esapi::utils::algorithm_specifiers::HashingAlgorithm::Sha1,
-            HashAlgo::SHA256 => tss_esapi::utils::algorithm_specifiers::HashingAlgorithm::Sha256,
-            HashAlgo::SHA384 => tss_esapi::utils::algorithm_specifiers::HashingAlgorithm::Sha384,
-            HashAlgo::SHA512 => tss_esapi::utils::algorithm_specifiers::HashingAlgorithm::Sha512,
-            HashAlgo::SM3_256 => tss_esapi::utils::algorithm_specifiers::HashingAlgorithm::Sm3_256,
-            HashAlgo::SHA3_256 => {
-                tss_esapi::utils::algorithm_specifiers::HashingAlgorithm::Sha3_256
-            }
-            HashAlgo::SHA3_384 => {
-                tss_esapi::utils::algorithm_specifiers::HashingAlgorithm::Sha3_384
-            }
-            HashAlgo::SHA3_512 => {
-                tss_esapi::utils::algorithm_specifiers::HashingAlgorithm::Sha3_512
-            }
-        }
-    }
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-enum PublicKey {
-    RSA {
-        scheme: RSAPublicKeyScheme,
-        hashing_algo: HashAlgo,
-        exponent: u32,
-        #[serde(
-            deserialize_with = "deserialize_as_base64",
-            serialize_with = "serialize_as_base64"
-        )]
-        modulus: Vec<u8>,
-    },
-}
-
-impl PublicKey {
-    fn get_signing_scheme(&self) -> tss_esapi::utils::AsymSchemeUnion {
-        match self {
-            PublicKey::RSA {
-                scheme,
-                hashing_algo,
-                exponent: _,
-                modulus: _,
-            } => scheme.to_scheme(hashing_algo),
-        }
-    }
-}
-
-impl TryFrom<&PublicKey> for tss_esapi::tss2_esys::TPM2B_PUBLIC {
-    type Error = PinError;
-
-    fn try_from(publickey: &PublicKey) -> Result<Self, Self::Error> {
-        match publickey {
-            PublicKey::RSA {
-                scheme,
-                hashing_algo,
-                modulus,
-                exponent,
-            } => {
-                let mut object_attributes = tss_esapi::utils::ObjectAttributes(0);
-                object_attributes.set_fixed_tpm(false);
-                object_attributes.set_fixed_parent(false);
-                object_attributes.set_sensitive_data_origin(false);
-                object_attributes.set_user_with_auth(true);
-                object_attributes.set_decrypt(false);
-                object_attributes.set_sign_encrypt(true);
-                object_attributes.set_restricted(false);
-
-                let len = modulus.len();
-                let mut buffer = [0_u8; 512];
-                buffer[..len].clone_from_slice(&modulus[..len]);
-                let rsa_uniq = Box::new(tss_esapi::tss2_esys::TPM2B_PUBLIC_KEY_RSA {
-                    size: len as u16,
-                    buffer,
-                });
-
-                Ok(tss_esapi::utils::Tpm2BPublicBuilder::new()
-                    .with_type(tss_esapi::constants::TPM2_ALG_RSA)
-                    .with_name_alg(hashing_algo.to_tpmi_alg_hash())
-                    .with_parms(tss_esapi::utils::PublicParmsUnion::RsaDetail(
-                        tss_esapi::utils::TpmsRsaParmsBuilder::new_unrestricted_signing_key(
-                            scheme.to_scheme(&hashing_algo),
-                            (modulus.len() * 8) as u16,
-                            *exponent,
-                        )
-                        .build()?,
-                    ))
-                    .with_object_attributes(object_attributes)
-                    .with_unique(tss_esapi::utils::PublicIdUnion::Rsa(rsa_uniq))
-                    .build()?)
-            }
-        }
     }
 }
 
