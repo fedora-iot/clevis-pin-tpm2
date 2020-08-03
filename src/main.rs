@@ -16,6 +16,7 @@ use std::convert::TryFrom;
 use std::error::Error;
 use std::fmt;
 use std::fs;
+use std::str::FromStr;
 
 extern crate atty;
 extern crate base64;
@@ -880,22 +881,46 @@ fn main() {
 }
 
 fn get_tpm2_ctx() -> Result<Context, tss_esapi::response_code::Error> {
-    if std::path::Path::new("/dev/tpmrm0").exists() {
-        unsafe { Context::new(tcti::Tcti::Tabrmd(Default::default())) }
-    } else {
-        unsafe { Context::new(tcti::Tcti::Device(Default::default())) }
+    unsafe {
+        Context::new(tcti::Tcti::Device(
+            tcti::DeviceConfig::from_str(
+                if std::path::Path::new("/dev/tpmrm0").exists() {
+                    "/dev/tpmrm0"
+                } else {
+                    "/dev/tpm0"
+                }
+            )?
+        ))
     }
+}
+
+fn perform_with_other_sessions<T, E, F>(ctx: &mut Context, sestype: tss_esapi::tss2_esys::TPM2_SE, f: F) -> Result<T, E>
+where
+    F: Fn(&mut Context) -> Result<T, E>,
+    E: From<tss_esapi::response_code::Error> + From<PinError>
+{
+    let oldses = ctx.sessions();
+
+    let res = create_and_set_tpm2_session(ctx, sestype);
+    if res.is_err() {
+        ctx.set_sessions(oldses);
+        ctx.flush_context(ctx.sessions().0)?;
+        res?;
+    }
+
+    let res = f(ctx);
+
+    ctx.flush_context(ctx.sessions().0)?;
+
+    ctx.set_sessions(oldses);
+
+    res
 }
 
 fn get_tpm2_primary_key(
     ctx: &mut Context,
     pub_template: &tss_esapi::tss2_esys::TPM2B_PUBLIC,
 ) -> Result<ESYS_TR, PinError> {
-    let cur_sessions = ctx.sessions();
-
-    create_and_set_tpm2_session(ctx, tss_esapi::constants::TPM2_SE_HMAC)?;
-    let key_handle = ctx.create_primary_key(ESYS_TR_RH_OWNER, pub_template, &[], &[], &[], &[])?;
-
-    ctx.set_sessions(cur_sessions);
-    Ok(key_handle)
+    perform_with_other_sessions(ctx, tss_esapi::constants::TPM2_SE_HMAC,
+        |ctx| ctx.create_primary_key(ESYS_TR_RH_OWNER, pub_template, &[], &[], &[], &[]).map_err(|e| e.into()))
 }
