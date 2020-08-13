@@ -1,7 +1,11 @@
 use std::convert::TryFrom;
 
-use tss_esapi::constants;
-use tss_esapi::utils;
+use tss_esapi::constants::algorithm;
+use tss_esapi::constants::tss as tss_constants;
+use tss_esapi::structures::Digest;
+use tss_esapi::utils::{
+    ObjectAttributes, PublicParmsUnion, Tpm2BPublicBuilder, TpmsEccParmsBuilder,
+};
 
 use crate::PinError;
 
@@ -11,7 +15,7 @@ pub(super) fn get_key_public(
     match key_type {
         "ecc" => Ok(create_restricted_ecc_public()),
         "rsa" => Ok(tss_esapi::utils::create_restricted_decryption_rsa_public(
-            utils::algorithm_specifiers::Cipher::aes_128_cfb(),
+            algorithm::Cipher::aes_128_cfb(),
             2048,
             0,
         )?),
@@ -20,9 +24,9 @@ pub(super) fn get_key_public(
 }
 
 pub(super) fn create_tpm2b_public_sealed_object(
-    policy: Option<tss_esapi::utils::Digest>,
+    policy: Option<Digest>,
 ) -> Result<tss_esapi::tss2_esys::TPM2B_PUBLIC, PinError> {
-    let mut object_attributes = utils::ObjectAttributes(0);
+    let mut object_attributes = ObjectAttributes(0);
     object_attributes.set_fixed_tpm(true);
     object_attributes.set_fixed_parent(true);
     object_attributes.set_no_da(true);
@@ -33,17 +37,17 @@ pub(super) fn create_tpm2b_public_sealed_object(
     }
     let policy = match policy {
         Some(p) => p,
-        None => tss_esapi::utils::Digest::try_from(vec![])?,
+        None => Digest::try_from(vec![])?,
     };
 
     let mut params: tss_esapi::tss2_esys::TPMU_PUBLIC_PARMS = Default::default();
-    params.keyedHashDetail.scheme.scheme = tss_esapi::constants::TPM2_ALG_NULL;
+    params.keyedHashDetail.scheme.scheme = tss_constants::TPM2_ALG_NULL;
 
     Ok(tss_esapi::tss2_esys::TPM2B_PUBLIC {
         size: std::mem::size_of::<tss_esapi::tss2_esys::TPMT_PUBLIC>() as u16,
         publicArea: tss_esapi::tss2_esys::TPMT_PUBLIC {
-            type_: tss_esapi::constants::TPM2_ALG_KEYEDHASH,
-            nameAlg: tss_esapi::constants::TPM2_ALG_SHA256,
+            type_: tss_constants::TPM2_ALG_KEYEDHASH,
+            nameAlg: tss_constants::TPM2_ALG_SHA256,
             objectAttributes: object_attributes.0,
             authPolicy: tss_esapi::tss2_esys::TPM2B_DIGEST::try_from(policy)?,
             parameters: params,
@@ -139,13 +143,13 @@ pub(super) fn build_tpm2b_public(
 }
 
 pub(super) fn create_restricted_ecc_public() -> tss_esapi::tss2_esys::TPM2B_PUBLIC {
-    let ecc_params = utils::TpmsEccParmsBuilder::new_restricted_decryption_key(
-        utils::algorithm_specifiers::Cipher::aes_128_cfb(),
-        utils::algorithm_specifiers::EllipticCurve::NistP256,
+    let ecc_params = TpmsEccParmsBuilder::new_restricted_decryption_key(
+        algorithm::Cipher::aes_128_cfb(),
+        algorithm::EllipticCurve::NistP256,
     )
     .build()
     .unwrap();
-    let mut object_attributes = utils::ObjectAttributes(0);
+    let mut object_attributes = ObjectAttributes(0);
     object_attributes.set_fixed_tpm(true);
     object_attributes.set_fixed_parent(true);
     object_attributes.set_sensitive_data_origin(true);
@@ -154,11 +158,11 @@ pub(super) fn create_restricted_ecc_public() -> tss_esapi::tss2_esys::TPM2B_PUBL
     object_attributes.set_sign_encrypt(false);
     object_attributes.set_restricted(true);
 
-    utils::Tpm2BPublicBuilder::new()
-        .with_type(constants::TPM2_ALG_ECC)
-        .with_name_alg(constants::TPM2_ALG_SHA256)
+    Tpm2BPublicBuilder::new()
+        .with_type(tss_constants::TPM2_ALG_ECC)
+        .with_name_alg(tss_constants::TPM2_ALG_SHA256)
         .with_object_attributes(object_attributes)
-        .with_parms(utils::PublicParmsUnion::EccDetail(ecc_params))
+        .with_parms(PublicParmsUnion::EccDetail(ecc_params))
         .build()
         .unwrap()
 }

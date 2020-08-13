@@ -39,13 +39,15 @@ mod utils;
 
 use cli::TPM2Config;
 
+use tss_esapi::algorithm::structures::SensitiveData;
+
 #[derive(Debug)]
 enum PinError {
     Text(&'static str),
     NoCommand,
     Serde(serde_json::Error),
     IO(std::io::Error),
-    TPM(tss_esapi::response_code::Error),
+    TPM(tss_esapi::Error),
     JWE(biscuit::errors::Error),
     Base64Decoding(base64::DecodeError),
     Utf8(std::str::Utf8Error),
@@ -117,8 +119,8 @@ impl From<serde_json::Error> for PinError {
     }
 }
 
-impl From<tss_esapi::response_code::Error> for PinError {
-    fn from(err: tss_esapi::response_code::Error) -> Self {
+impl From<tss_esapi::Error> for PinError {
+    fn from(err: tss_esapi::Error) -> Self {
         PinError::TPM(err)
     }
 }
@@ -161,7 +163,8 @@ fn perform_encrypt(cfg: TPM2Config, input: &str) -> Result<(), PinError> {
 
     let policy_digest = policy_runner.send_policy(&mut ctx, true)?;
 
-    let key_bytes: Vec<u8> = ctx.get_random(32)?;
+    let key_bytes = ctx.get_random(32)?;
+    let key_bytes: &[u8] = key_bytes.value();
     let mut jwk = biscuit::jwk::JWK::new_octet_key(&key_bytes, biscuit::Empty {});
     jwk.common.algorithm = Some(biscuit::jwa::Algorithm::ContentEncryption(
         biscuit::jwa::ContentEncryptionAlgorithm::A256GCM,
@@ -173,8 +176,9 @@ fn perform_encrypt(cfg: TPM2Config, input: &str) -> Result<(), PinError> {
     let jwk_str = serde_json::to_string(&jwk)?;
 
     let public = tpm_objects::create_tpm2b_public_sealed_object(policy_digest)?;
+    let jwk_str = SensitiveData::try_from(jwk_str.as_bytes().to_vec())?;
     let (jwk_priv, jwk_pub) =
-        ctx.create_key(key_handle, &public, &[], jwk_str.as_bytes(), &[], &[])?;
+        ctx.create_key(key_handle, &public, None, Some(&jwk_str), None, &[])?;
 
     let jwk_priv = tpm_objects::get_tpm2b_private(jwk_priv)?;
 
@@ -218,7 +222,9 @@ fn perform_encrypt(cfg: TPM2Config, input: &str) -> Result<(), PinError> {
     };
 
     let rand_nonce = ctx.get_random(12)?;
-    let jwe_enc_options = biscuit::jwa::EncryptionOptions::AES_GCM { nonce: rand_nonce };
+    let jwe_enc_options = biscuit::jwa::EncryptionOptions::AES_GCM {
+        nonce: rand_nonce.value().to_vec(),
+    };
 
     let jwe_token = biscuit::jwe::Compact::new_decrypted(hdr, input.as_bytes().to_vec());
     let jwe_token_compact = jwe_token.encrypt(&jwk, &jwe_enc_options)?;
@@ -344,7 +350,7 @@ fn perform_decrypt(input: &str) -> Result<(), PinError> {
     let mut ctx = utils::get_tpm2_ctx()?;
     let key_handle = utils::get_tpm2_primary_key(&mut ctx, &key_public)?;
 
-    utils::create_and_set_tpm2_session(&mut ctx, tss_esapi::constants::TPM2_SE_HMAC)?;
+    utils::create_and_set_tpm2_session(&mut ctx, tss_esapi::constants::tss::TPM2_SE_HMAC)?;
     let key = ctx.load(key_handle, jwkpriv, jwkpub)?;
 
     policy.send_policy(&mut ctx, false)?;

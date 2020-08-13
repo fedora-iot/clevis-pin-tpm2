@@ -63,9 +63,7 @@ impl TryFrom<&TPM2Config> for TPMPolicyStep {
 }
 
 impl TPM2Config {
-    pub(super) fn get_pcr_hash_alg(
-        &self,
-    ) -> tss_esapi::utils::algorithm_specifiers::HashingAlgorithm {
+    pub(super) fn get_pcr_hash_alg(&self) -> tss_esapi::constants::algorithm::HashingAlgorithm {
         crate::utils::get_pcr_hash_alg_from_name(self.pcr_bank.as_ref())
     }
 

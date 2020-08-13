@@ -7,10 +7,10 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-tss-esapi = "4.0.5-alpha.1"
+tss-esapi = "4.0.6-alpha.1"
 serde = "1.0"
 biscuit = "0.5.0-beta2"
 serde_json = "1.0"
 base64 = "0.12.1"
 atty = "0.2.14"
-tpm2-policy = "0.1.0"
+tpm2-policy = "0.2.0"
