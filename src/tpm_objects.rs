@@ -7,6 +7,11 @@ use tss_esapi::utils::{
     ObjectAttributes, PublicParmsUnion, Tpm2BPublicBuilder, TpmsEccParmsBuilder,
 };
 
+#[cfg(target_pointer_width = "64")]
+type Sizedu = u64;
+#[cfg(target_pointer_width = "32")]
+type Sizedu = u32;
+
 use crate::PinError;
 
 pub(super) fn get_key_public(
@@ -59,14 +64,14 @@ pub(super) fn create_tpm2b_public_sealed_object(
 pub(super) fn get_tpm2b_public(
     val: tss_esapi::tss2_esys::TPM2B_PUBLIC,
 ) -> Result<Vec<u8>, PinError> {
-    let mut offset = 0 as u64;
+    let mut offset = 0 as Sizedu;
     let mut resp = Vec::with_capacity((val.size + 4) as usize);
 
     unsafe {
         let res = tss_esapi::tss2_esys::Tss2_MU_TPM2B_PUBLIC_Marshal(
             &val,
             resp.as_mut_ptr(),
-            resp.capacity() as u64,
+            resp.capacity() as Sizedu,
             &mut offset,
         );
         if res != 0 {
@@ -81,14 +86,14 @@ pub(super) fn get_tpm2b_public(
 pub(super) fn get_tpm2b_private(
     val: tss_esapi::tss2_esys::TPM2B_PRIVATE,
 ) -> Result<Vec<u8>, PinError> {
-    let mut offset = 0 as u64;
+    let mut offset = 0 as Sizedu;
     let mut resp = Vec::with_capacity((val.size + 4) as usize);
 
     unsafe {
         let res = tss_esapi::tss2_esys::Tss2_MU_TPM2B_PRIVATE_Marshal(
             &val,
             resp.as_mut_ptr(),
-            resp.capacity() as u64,
+            resp.capacity() as Sizedu,
             &mut offset,
         );
         if res != 0 {
@@ -104,12 +109,12 @@ pub(super) fn build_tpm2b_private(
     val: &[u8],
 ) -> Result<tss_esapi::tss2_esys::TPM2B_PRIVATE, PinError> {
     let mut resp = tss_esapi::tss2_esys::TPM2B_PRIVATE::default();
-    let mut offset = 0 as u64;
+    let mut offset = 0 as Sizedu;
 
     unsafe {
         let res = tss_esapi::tss2_esys::Tss2_MU_TPM2B_PRIVATE_Unmarshal(
             val[..].as_ptr(),
-            val.len() as u64,
+            val.len() as Sizedu,
             &mut offset,
             &mut resp,
         );
@@ -125,12 +130,12 @@ pub(super) fn build_tpm2b_public(
     val: &[u8],
 ) -> Result<tss_esapi::tss2_esys::TPM2B_PUBLIC, PinError> {
     let mut resp = tss_esapi::tss2_esys::TPM2B_PUBLIC::default();
-    let mut offset = 0 as u64;
+    let mut offset = 0 as Sizedu;
 
     unsafe {
         let res = tss_esapi::tss2_esys::Tss2_MU_TPM2B_PUBLIC_Unmarshal(
             val[..].as_ptr(),
-            val.len() as u64,
+            val.len() as Sizedu,
             &mut offset,
             &mut resp,
         );

@@ -1,6 +1,6 @@
 [package]
 name = "clevis-pin-tpm2"
-version = "0.1.1"
+version = "0.1.2"
 authors = ["Patrick Uiterwijk <patrick@puiterwijk.org>"]
 edition = "2018"
 
