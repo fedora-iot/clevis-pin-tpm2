@@ -1,8 +1,14 @@
 #!/bin/bash
+rm -f target/debug/clevis-{encrypt,decrypt}-tpm2plus
 cargo build || (echo "Failed to build"; exit 1)
+ln -s clevis-pin-tpm2 target/debug/clevis-encrypt-tpm2plus
+ln -s clevis-pin-tpm2 target/debug/clevis-decrypt-tpm2plus
+
 echo "Working: no sealing" | ./target/debug/clevis-pin-tpm2 encrypt '{}' | ./target/debug/clevis-pin-tpm2 decrypt || (echo "Failed: no sealing"; exit 1)
 echo "Working: no sealing (clevis decrypt)" | ./target/debug/clevis-pin-tpm2 encrypt '{}' | clevis decrypt || (echo "Failed: no sealing (clevis decrypt)"; exit 1)
 echo "Working: no sealing (clevis encrypt)" | clevis encrypt tpm2 '{}' | ./target/debug/clevis-pin-tpm2 decrypt || (echo "Failed: no sealing (clevis encrypt)"; exit 1)
+echo "Working: no sealing (renamed encrypt)" | ./target/debug/clevis-encrypt-tpm2plus '{}' | ./target/debug/clevis-pin-tpm2 decrypt || (echo "Failed: no sealing"; exit 1)
+echo "Working: no sealing (renamed decrypt)" | ./target/debug/clevis-pin-tpm2 encrypt '{}' | ./target/debug/clevis-decrypt-tpm2plus || (echo "Failed: no sealing (clevis decrypt)"; exit 1)
 echo "Working: with PCRs" | ./target/debug/clevis-pin-tpm2 encrypt '{"pcr_ids":[23]}' | ./target/debug/clevis-pin-tpm2 decrypt || (echo "Failed: with PCRs"; exit 1)
 echo "Working: with PCRs (clevis decrypt)" | ./target/debug/clevis-pin-tpm2 encrypt '{"pcr_ids":[23]}' | clevis decrypt || (echo "Failed: with PCRs (clevis decrypt)"; exit 1)
 echo "Working: with PCRs (clevis encrypt)" | clevis encrypt tpm2 '{"pcr_ids":[23]}' | ./target/debug/clevis-pin-tpm2 decrypt || (echo "Failed: with PCRs (clevis encrypt)"; exit 1)
