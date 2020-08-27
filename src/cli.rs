@@ -110,12 +110,20 @@ impl TPM2Config {
     }
 
     fn normalize_pcr_ids(&mut self) -> Result<(), PinError> {
+        // Normalize from array with one string to just string
+        if let Some(serde_json::Value::Array(vals)) = &self.pcr_ids {
+            if vals.len() == 1 {
+                if let serde_json::Value::String(val) = &vals[0] {
+                    self.pcr_ids = Some(serde_json::Value::String(val.to_string()));
+                }
+            }
+        }
         // Normalize pcr_ids from comma-separated string to array
         if let Some(serde_json::Value::String(val)) = &self.pcr_ids {
             // Was a string, do a split
             let newval: Vec<serde_json::Value> = val
                 .split(',')
-                .map(|x| serde_json::Value::String(x.to_string()))
+                .map(|x| serde_json::Value::String(x.trim().to_string()))
                 .collect();
             self.pcr_ids = Some(serde_json::Value::Array(newval));
         }
@@ -124,7 +132,7 @@ impl TPM2Config {
             let newvals: Result<Vec<serde_json::Value>, _> = vals
                 .iter()
                 .map(|x| match x {
-                    serde_json::Value::String(val) => match val.parse::<serde_json::Number>() {
+                    serde_json::Value::String(val) => match val.trim().parse::<serde_json::Number>() {
                         Ok(res) => {
                             let new = serde_json::Value::Number(res);
                             if !new.is_u64() {
