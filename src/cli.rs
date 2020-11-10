@@ -132,16 +132,18 @@ impl TPM2Config {
             let newvals: Result<Vec<serde_json::Value>, _> = vals
                 .iter()
                 .map(|x| match x {
-                    serde_json::Value::String(val) => match val.trim().parse::<serde_json::Number>() {
-                        Ok(res) => {
-                            let new = serde_json::Value::Number(res);
-                            if !new.is_u64() {
-                                return Err("Non-positive string int");
+                    serde_json::Value::String(val) => {
+                        match val.trim().parse::<serde_json::Number>() {
+                            Ok(res) => {
+                                let new = serde_json::Value::Number(res);
+                                if !new.is_u64() {
+                                    return Err("Non-positive string int");
+                                }
+                                Ok(new)
                             }
-                            Ok(new)
+                            Err(_) => Err("Unparseable string int"),
                         }
-                        Err(_) => Err("Unparseable string int"),
-                    },
+                    }
                     serde_json::Value::Number(n) => {
                         let new = serde_json::Value::Number(n.clone());
                         if !new.is_u64() {
