@@ -184,12 +184,12 @@ pub(super) fn get_mode_and_cfg(
     if atty::is(atty::Stream::Stdin) {
         return Ok((ActionMode::Help, None));
     }
-    let (mode, cfgstr) = if args[0].contains("encrypt") && args.len() == 2 {
+    let (mode, cfgstr) = if args[0].contains("encrypt") && args.len() >= 2 {
         (ActionMode::Encrypt, Some(&args[1]))
     } else if args[0].contains("decrypt") {
         (ActionMode::Decrypt, None)
     } else if args.len() > 1 {
-        if args[1] == "encrypt" && args.len() == 3 {
+        if args[1] == "encrypt" && args.len() >= 3 {
             (ActionMode::Encrypt, Some(&args[2]))
         } else if args[1] == "decrypt" {
             (ActionMode::Decrypt, None)
