@@ -413,12 +413,15 @@ This command uses the following configuration properties:
 
   pcr_ids: <string>  PCR list used for policy. If not present, no PCR policy is used
 
-  policy_pubkey_path: <string>  Path to the policy public key for authorized policy decryption
+  use_policy: <bool>  Whether to use a policy
 
-  policy_ref: <string>  Reference to search for in signed policy file
+  policy_ref: <string>  Reference to search for in signed policy file (default: {})
 
-  policy_path: <string>  Path to the policy path to search for decryption policy
-"
+  > For policies, the path is {}, and the public key is at {}
+",
+        cli::DEFAULT_POLICY_REF,
+        cli::DEFAULT_POLICY_PATH,
+        cli::DEFAULT_PUBKEY_PATH,
     );
 
     std::process::exit(2);

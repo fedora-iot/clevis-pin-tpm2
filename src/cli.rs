@@ -15,6 +15,8 @@ pub(super) struct TPM2Config {
     // PCR IDs can be passed in as comma-separated string or json array
     pub pcr_ids: Option<serde_json::Value>,
     pub pcr_digest: Option<String>,
+    // Whether to use a policy. If this is specified without pubkey path or policy path, they get set to defaults
+    pub use_policy: Option<bool>,
     // Public key (in JSON format) for a wildcard policy that's possibly OR'd with the PCR one
     pub policy_pubkey_path: Option<String>,
     pub policy_ref: Option<String>,
@@ -62,6 +64,10 @@ impl TryFrom<&TPM2Config> for TPMPolicyStep {
     }
 }
 
+pub(crate) const DEFAULT_POLICY_PATH: &str = "/boot/clevis_policy.json";
+pub(crate) const DEFAULT_PUBKEY_PATH: &str = "/boot/clevis_pubkey.json";
+pub(crate) const DEFAULT_POLICY_REF: &str = "";
+
 impl TPM2Config {
     pub(super) fn get_pcr_hash_alg(&self) -> tss_esapi::constants::algorithm::HashingAlgorithm {
         crate::utils::get_pcr_hash_alg_from_name(self.pcr_bank.as_ref())
@@ -94,6 +100,23 @@ impl TPM2Config {
         self.normalize_pcr_ids()?;
         if self.pcr_ids.is_some() && self.pcr_bank.is_none() {
             self.pcr_bank = Some("sha256".to_string());
+        }
+        // Make use of the defaults if not specified
+        if self.use_policy.is_some() && self.use_policy.unwrap() {
+            if self.policy_path.is_none() {
+                self.policy_path = Some(DEFAULT_POLICY_PATH.to_string());
+            }
+            if self.policy_pubkey_path.is_none() {
+                self.policy_pubkey_path = Some(DEFAULT_PUBKEY_PATH.to_string());
+            }
+            if self.policy_ref.is_none() {
+                self.policy_ref = Some(DEFAULT_POLICY_REF.to_string());
+            }
+        } else if self.policy_pubkey_path.is_some()
+            || self.policy_path.is_some()
+            || self.policy_ref.is_some()
+        {
+            eprintln!("To use a policy, please specifiy use_policy: true. Not specifying this will be a fatal error in a next release");
         }
         if (self.policy_pubkey_path.is_some()
             || self.policy_path.is_some()
