@@ -16,13 +16,6 @@ use std::convert::{TryFrom, TryInto};
 use std::error::Error;
 use std::fmt;
 
-extern crate atty;
-extern crate base64;
-extern crate biscuit;
-extern crate serde;
-extern crate serde_json;
-extern crate tss_esapi;
-
 use std::env;
 use std::io::{self, Read, Write};
 
