@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::convert::TryFrom;
+use std::convert::{TryFrom, TryInto};
 use std::error::Error;
 use std::fmt;
 
@@ -39,7 +39,7 @@ mod utils;
 
 use cli::TPM2Config;
 
-use tss_esapi::algorithm::structures::SensitiveData;
+use tss_esapi::structures::{PcrSelectionListBuilder, SensitiveData};
 
 #[derive(Debug)]
 enum PinError {
@@ -161,7 +161,7 @@ fn perform_encrypt(cfg: TPM2Config, input: &str) -> Result<(), PinError> {
         _ => "tpm2plus",
     };
 
-    let policy_digest = policy_runner.send_policy(&mut ctx, true)?;
+    let (_, policy_digest) = policy_runner.send_policy(&mut ctx, true)?;
 
     let key_bytes = ctx.get_random(32)?;
     let key_bytes: &[u8] = key_bytes.value();
@@ -177,12 +177,20 @@ fn perform_encrypt(cfg: TPM2Config, input: &str) -> Result<(), PinError> {
 
     let public = tpm_objects::create_tpm2b_public_sealed_object(policy_digest)?;
     let jwk_str = SensitiveData::try_from(jwk_str.as_bytes().to_vec())?;
-    let (jwk_priv, jwk_pub) =
-        ctx.create_key(key_handle, &public, None, Some(&jwk_str), None, &[])?;
+    let jwk_result = ctx.execute_with_nullauth_session(|ctx| {
+        ctx.create_key(
+            key_handle,
+            &public,
+            None,
+            Some(&jwk_str),
+            None,
+            PcrSelectionListBuilder::new().build(),
+        )
+    })?;
 
-    let jwk_priv = tpm_objects::get_tpm2b_private(jwk_priv)?;
+    let jwk_priv = tpm_objects::get_tpm2b_private(jwk_result.out_private.try_into()?)?;
 
-    let jwk_pub = tpm_objects::get_tpm2b_public(jwk_pub)?;
+    let jwk_pub = tpm_objects::get_tpm2b_public(jwk_result.out_public)?;
 
     let hdr: biscuit::jwe::Header<ClevisHeader> = biscuit::jwe::Header {
         registered: biscuit::jwe::RegisteredHeader {
@@ -350,12 +358,12 @@ fn perform_decrypt(input: &str) -> Result<(), PinError> {
     let mut ctx = utils::get_tpm2_ctx()?;
     let key_handle = utils::get_tpm2_primary_key(&mut ctx, &key_public)?;
 
-    utils::create_and_set_tpm2_session(&mut ctx, tss_esapi::constants::tss::TPM2_SE_HMAC)?;
-    let key = ctx.load(key_handle, jwkpriv, jwkpub)?;
+    let key =
+        ctx.execute_with_nullauth_session(|ctx| ctx.load(key_handle, jwkpriv.try_into()?, jwkpub))?;
 
-    policy.send_policy(&mut ctx, false)?;
+    let (policy_session, _) = policy.send_policy(&mut ctx, false)?;
 
-    let unsealed = ctx.unseal(key)?;
+    let unsealed = ctx.execute_with_session(policy_session, |ctx| ctx.unseal(key.into()))?;
     let unsealed = &unsealed.value();
     let unsealed = std::str::from_utf8(unsealed)?;
     let jwk: biscuit::jwk::JWK<biscuit::Empty> = serde_json::from_str(unsealed)?;
