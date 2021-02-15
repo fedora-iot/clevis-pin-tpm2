@@ -177,7 +177,7 @@ fn perform_encrypt(cfg: TPM2Config, input: &str) -> Result<(), PinError> {
             None,
             Some(&jwk_str),
             None,
-            PcrSelectionListBuilder::new().build(),
+            Some(PcrSelectionListBuilder::new().build()),
         )
     })?;
 

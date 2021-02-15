@@ -104,7 +104,7 @@ pub(crate) fn get_tpm2_primary_key(
             None,
             None,
             None,
-            PcrSelectionListBuilder::new().build(),
+            Some(PcrSelectionListBuilder::new().build()),
         )
         .map(|r| r.key_handle)
     })
