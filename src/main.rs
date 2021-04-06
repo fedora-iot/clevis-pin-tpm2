@@ -32,7 +32,7 @@ mod utils;
 
 use cli::TPM2Config;
 
-use tss_esapi::structures::{PcrSelectionListBuilder, SensitiveData};
+use tss_esapi::structures::SensitiveData;
 
 #[derive(Debug)]
 enum PinError {
@@ -171,17 +171,10 @@ fn perform_encrypt(cfg: TPM2Config, input: &str) -> Result<(), PinError> {
     let public = tpm_objects::create_tpm2b_public_sealed_object(policy_digest)?;
     let jwk_str = SensitiveData::try_from(jwk_str.as_bytes().to_vec())?;
     let jwk_result = ctx.execute_with_nullauth_session(|ctx| {
-        ctx.create_key(
-            key_handle,
-            &public,
-            None,
-            Some(&jwk_str),
-            None,
-            PcrSelectionListBuilder::new().build(),
-        )
+        ctx.create(key_handle, &public, None, Some(&jwk_str), None, None)
     })?;
 
-    let jwk_priv = tpm_objects::get_tpm2b_private(jwk_result.out_private.try_into()?)?;
+    let jwk_priv = tpm_objects::get_tpm2b_private(jwk_result.out_private.into())?;
 
     let jwk_pub = tpm_objects::get_tpm2b_public(jwk_result.out_public)?;
 

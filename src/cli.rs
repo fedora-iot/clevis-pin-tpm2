@@ -69,7 +69,9 @@ pub(crate) const DEFAULT_PUBKEY_PATH: &str = "/boot/clevis_pubkey.json";
 pub(crate) const DEFAULT_POLICY_REF: &str = "";
 
 impl TPM2Config {
-    pub(super) fn get_pcr_hash_alg(&self) -> tss_esapi::constants::algorithm::HashingAlgorithm {
+    pub(super) fn get_pcr_hash_alg(
+        &self,
+    ) -> tss_esapi::interface_types::algorithm::HashingAlgorithm {
         crate::utils::get_pcr_hash_alg_from_name(self.pcr_bank.as_ref())
     }
 
