@@ -44,6 +44,7 @@ enum PinError {
     JWE(biscuit::errors::Error),
     Base64Decoding(base64::DecodeError),
     Utf8(std::str::Utf8Error),
+    FromUtf8(std::string::FromUtf8Error),
     PolicyError(tpm2_policy::Error),
 }
 
@@ -74,6 +75,10 @@ impl fmt::Display for PinError {
                 err.fmt(f)
             }
             PinError::Utf8(err) => {
+                write!(f, "UTF8 error: ")?;
+                err.fmt(f)
+            }
+            PinError::FromUtf8(err) => {
                 write!(f, "UTF8 error: ")?;
                 err.fmt(f)
             }
@@ -136,7 +141,7 @@ impl From<std::str::Utf8Error> for PinError {
     }
 }
 
-fn perform_encrypt(cfg: TPM2Config, input: &str) -> Result<(), PinError> {
+fn perform_encrypt(cfg: TPM2Config, input: Vec<u8>) -> Result<(), PinError> {
     let key_type = match &cfg.key {
         None => "ecc",
         Some(key_type) => key_type,
@@ -220,7 +225,7 @@ fn perform_encrypt(cfg: TPM2Config, input: &str) -> Result<(), PinError> {
         nonce: rand_nonce.value().to_vec(),
     };
 
-    let jwe_token = biscuit::jwe::Compact::new_decrypted(hdr, input.as_bytes().to_vec());
+    let jwe_token = biscuit::jwe::Compact::new_decrypted(hdr, input);
     let jwe_token_compact = jwe_token.encrypt(&jwk, &jwe_enc_options)?;
     let encoded_token = jwe_token_compact.encrypted()?.encode();
     io::stdout().write_all(encoded_token.as_bytes())?;
@@ -326,7 +331,8 @@ impl CompactJson for Tpm2Inner {}
 impl CompactJson for ClevisHeader {}
 impl CompactJson for ClevisInner {}
 
-fn perform_decrypt(input: &str) -> Result<(), PinError> {
+fn perform_decrypt(input: Vec<u8>) -> Result<(), PinError> {
+    let input = String::from_utf8(input).map_err(PinError::FromUtf8)?;
     let token = biscuit::Compact::decode(input.trim());
     let hdr: biscuit::jwe::Header<ClevisHeader> = token.part(0)?;
 
@@ -367,15 +373,6 @@ fn perform_decrypt(input: &str) -> Result<(), PinError> {
     io::stdout().write_all(payload)?;
 
     Ok(())
-}
-
-fn read_input_token() -> Result<String, PinError> {
-    let mut buffer = String::new();
-    io::stdin().read_to_string(&mut buffer)?;
-    if buffer.is_empty() {
-        return Err(PinError::Text("No data provided"));
-    }
-    Ok(buffer)
 }
 
 fn print_summary() {
@@ -429,17 +426,15 @@ fn main() {
         _ => {}
     };
 
-    let input = match read_input_token() {
-        Err(e) => {
-            eprintln!("Error getting input token: {}", e);
-            std::process::exit(1);
-        }
-        Ok(input) => input,
-    };
+    let mut input = Vec::new();
+    if let Err(e) = io::stdin().read_to_end(&mut input) {
+        eprintln!("Error getting input token: {}", e);
+        std::process::exit(1);
+    }
 
     if let Err(e) = match mode {
-        cli::ActionMode::Encrypt => perform_encrypt(cfg.unwrap(), &input),
-        cli::ActionMode::Decrypt => perform_decrypt(&input),
+        cli::ActionMode::Encrypt => perform_encrypt(cfg.unwrap(), input),
+        cli::ActionMode::Decrypt => perform_decrypt(input),
         cli::ActionMode::Summary => panic!("Summary was already handled supposedly"),
         cli::ActionMode::Help => panic!("Help was already handled supposedly"),
     } {
