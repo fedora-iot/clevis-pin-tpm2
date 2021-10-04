@@ -1,6 +1,6 @@
 [package]
 name = "clevis-pin-tpm2"
-version = "0.3.0"
+version = "0.4.1"
 description = "Clevis TPM2 PIN with policy support"
 authors = ["Patrick Uiterwijk <patrick@puiterwijk.org>"]
 edition = "2018"
@@ -16,4 +16,4 @@ biscuit = "0.5.0"
 serde_json = "1.0"
 base64 = "0.12.1"
 atty = "0.2.14"
-tpm2-policy = "0.5.0"
+tpm2-policy = "0.5.1"
