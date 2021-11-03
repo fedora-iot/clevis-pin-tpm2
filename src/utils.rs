@@ -45,7 +45,7 @@ pub(crate) fn get_authorized_policy_step(
     })
 }
 
-pub(crate) fn get_pcr_hash_alg_from_name(name: Option<&String>) -> HashingAlgorithm {
+pub(crate) fn get_hash_alg_from_name(name: Option<&String>) -> HashingAlgorithm {
     match name {
         None => HashingAlgorithm::Sha256,
         Some(val) => match val.to_lowercase().as_str() {

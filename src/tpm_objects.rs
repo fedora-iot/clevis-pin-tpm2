@@ -1,11 +1,11 @@
 use std::convert::TryFrom;
 
-use tss_esapi::abstraction::cipher::Cipher;
 use tss_esapi::attributes::object::ObjectAttributesBuilder;
 use tss_esapi::constants::tss as tss_constants;
 use tss_esapi::interface_types::ecc::EccCurve;
 use tss_esapi::structures::Digest;
 use tss_esapi::utils::{PublicParmsUnion, Tpm2BPublicBuilder, TpmsEccParmsBuilder};
+use tss_esapi::{abstraction::cipher::Cipher, interface_types::algorithm::HashingAlgorithm};
 
 #[cfg(target_pointer_width = "64")]
 type Sizedu = u64;
@@ -16,6 +16,7 @@ use crate::PinError;
 
 pub(super) fn get_key_public(
     key_type: &str,
+    name_alg: HashingAlgorithm,
 ) -> Result<tss_esapi::tss2_esys::TPM2B_PUBLIC, PinError> {
     match key_type {
         "ecc" => Ok(create_restricted_ecc_public()),
@@ -25,7 +26,10 @@ pub(super) fn get_key_public(
             0,
         )?),
         _ => Err(PinError::Text("Unsupported key type used")),
-    }
+    }.map(|mut public| {
+        public.publicArea.nameAlg = name_alg.into();
+        public
+    })
 }
 
 pub(super) fn create_tpm2b_public_sealed_object(

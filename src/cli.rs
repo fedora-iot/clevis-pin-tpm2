@@ -72,7 +72,13 @@ impl TPM2Config {
     pub(super) fn get_pcr_hash_alg(
         &self,
     ) -> tss_esapi::interface_types::algorithm::HashingAlgorithm {
-        crate::utils::get_pcr_hash_alg_from_name(self.pcr_bank.as_ref())
+        crate::utils::get_hash_alg_from_name(self.pcr_bank.as_ref())
+    }
+
+    pub(super) fn get_name_hash_alg(
+        &self,
+    ) -> tss_esapi::interface_types::algorithm::HashingAlgorithm {
+        crate::utils::get_hash_alg_from_name(self.hash.as_ref())
     }
 
     pub(super) fn get_pcr_ids(&self) -> Option<Vec<u64>> {

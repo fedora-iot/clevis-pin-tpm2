@@ -146,7 +146,7 @@ fn perform_encrypt(cfg: TPM2Config, input: Vec<u8>) -> Result<(), PinError> {
         None => "ecc",
         Some(key_type) => key_type,
     };
-    let key_public = tpm_objects::get_key_public(&key_type)?;
+    let key_public = tpm_objects::get_key_public(&key_type, cfg.get_name_hash_alg())?;
 
     let mut ctx = utils::get_tpm2_ctx()?;
     let key_handle = utils::get_tpm2_primary_key(&mut ctx, &key_public)?;
@@ -206,7 +206,7 @@ fn perform_encrypt(cfg: TPM2Config, input: Vec<u8>) -> Result<(), PinError> {
             clevis: ClevisInner {
                 pin: pin_type.to_string(),
                 tpm2: Tpm2Inner {
-                    hash: "sha256".to_string(),
+                    hash: cfg.hash.as_ref().unwrap_or(&"sha256".to_string()).clone(),
                     key: key_type.to_string(),
                     jwk_pub,
                     jwk_priv,
@@ -282,7 +282,7 @@ impl TryFrom<&Tpm2Inner> for TPMPolicyStep {
         if cfg.pcr_ids.is_some() && cfg.policy_pubkey_path.is_some() {
             Ok(TPMPolicyStep::Or([
                 Box::new(TPMPolicyStep::PCRs(
-                    utils::get_pcr_hash_alg_from_name(cfg.pcr_bank.as_ref()),
+                    utils::get_hash_alg_from_name(cfg.pcr_bank.as_ref()),
                     cfg.get_pcr_ids().unwrap(),
                     Box::new(TPMPolicyStep::NoStep),
                 )),
@@ -300,7 +300,7 @@ impl TryFrom<&Tpm2Inner> for TPMPolicyStep {
             ]))
         } else if cfg.pcr_ids.is_some() {
             Ok(TPMPolicyStep::PCRs(
-                utils::get_pcr_hash_alg_from_name(cfg.pcr_bank.as_ref()),
+                utils::get_hash_alg_from_name(cfg.pcr_bank.as_ref()),
                 cfg.get_pcr_ids().unwrap(),
                 Box::new(TPMPolicyStep::NoStep),
             ))
@@ -345,7 +345,8 @@ fn perform_decrypt(input: Vec<u8>) -> Result<(), PinError> {
 
     let policy = TPMPolicyStep::try_from(&hdr.private.clevis.tpm2)?;
 
-    let key_public = tpm_objects::get_key_public(hdr.private.clevis.tpm2.key.as_str())?;
+    let name_alg = crate::utils::get_hash_alg_from_name(Some(&hdr.private.clevis.tpm2.hash));
+    let key_public = tpm_objects::get_key_public(hdr.private.clevis.tpm2.key.as_str(), name_alg)?;
 
     let mut ctx = utils::get_tpm2_ctx()?;
     let key_handle = utils::get_tpm2_primary_key(&mut ctx, &key_public)?;
