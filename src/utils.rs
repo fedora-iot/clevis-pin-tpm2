@@ -2,38 +2,40 @@ use std::env;
 use std::fs;
 use std::str::FromStr;
 
+use anyhow::{Context as anyhow_context, Result};
+use serde::Deserialize;
+use tpm2_policy::{PublicKey, SignedPolicyList, TPMPolicyStep};
 use tss_esapi::{
     handles::KeyHandle,
     interface_types::{algorithm::HashingAlgorithm, resource_handles::Hierarchy},
     Context, Tcti,
 };
 
-use serde::Deserialize;
-
-use super::PinError;
-
-use tpm2_policy::{PublicKey, SignedPolicyList, TPMPolicyStep};
-
 pub(crate) fn get_authorized_policy_step(
     policy_pubkey_path: &str,
     policy_path: &Option<String>,
     policy_ref: &Option<String>,
-) -> Result<TPMPolicyStep, PinError> {
+) -> Result<TPMPolicyStep> {
     let policy_ref = match policy_ref {
         Some(policy_ref) => policy_ref.as_bytes().to_vec(),
         None => vec![],
     };
 
     let signkey = {
-        let contents = fs::read_to_string(policy_pubkey_path)?;
-        serde_json::from_str::<PublicKey>(&contents)?
+        let contents =
+            fs::read_to_string(policy_pubkey_path).context("Error reading policy signkey")?;
+        serde_json::from_str::<PublicKey>(&contents)
+            .context("Error deserializing signing public key")?
     };
 
     let policies = match policy_path {
         None => None,
         Some(policy_path) => {
-            let contents = fs::read_to_string(policy_path)?;
-            Some(serde_json::from_str::<SignedPolicyList>(&contents)?)
+            let contents = fs::read_to_string(policy_path).context("Error reading policy")?;
+            Some(
+                serde_json::from_str::<SignedPolicyList>(&contents)
+                    .context("Error deserializing policy")?,
+            )
         }
     };
 
@@ -53,7 +55,7 @@ pub(crate) fn get_hash_alg_from_name(name: Option<&String>) -> HashingAlgorithm 
             "sha256" => HashingAlgorithm::Sha256,
             "sha384" => HashingAlgorithm::Sha384,
             "sha512" => HashingAlgorithm::Sha512,
-            _ => panic!(format!("Unsupported hash algo: {:?}", name)),
+            _ => panic!("Unsupported hash algo: {:?}", name),
         },
     }
 }
@@ -77,7 +79,7 @@ where
     })
 }
 
-pub(crate) fn get_tpm2_ctx() -> Result<tss_esapi::Context, tss_esapi::Error> {
+pub(crate) fn get_tpm2_ctx() -> Result<tss_esapi::Context> {
     let tcti_path = match env::var("TCTI") {
         Ok(val) => val,
         Err(_) => {
@@ -89,14 +91,14 @@ pub(crate) fn get_tpm2_ctx() -> Result<tss_esapi::Context, tss_esapi::Error> {
         }
     };
 
-    let tcti = Tcti::from_str(&tcti_path)?;
-    unsafe { Context::new(tcti) }
+    let tcti = Tcti::from_str(&tcti_path).context("Error parsing TCTI specification")?;
+    Context::new(tcti).context("Error initializing TPM2 context")
 }
 
 pub(crate) fn get_tpm2_primary_key(
     ctx: &mut Context,
     pub_template: &tss_esapi::tss2_esys::TPM2B_PUBLIC,
-) -> Result<KeyHandle, PinError> {
+) -> Result<KeyHandle> {
     ctx.execute_with_nullauth_session(|ctx| {
         ctx.create_primary(Hierarchy::Owner, pub_template, None, None, None, None)
             .map(|r| r.key_handle)

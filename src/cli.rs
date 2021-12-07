@@ -1,11 +1,10 @@
 use std::convert::TryFrom;
 
-use super::PinError;
-use crate::utils::get_authorized_policy_step;
-
+use anyhow::{anyhow, bail, Error, Result};
 use serde::{Deserialize, Serialize};
-
 use tpm2_policy::TPMPolicyStep;
+
+use crate::utils::get_authorized_policy_step;
 
 #[derive(Serialize, Deserialize, std::fmt::Debug)]
 pub(super) struct TPM2Config {
@@ -24,9 +23,9 @@ pub(super) struct TPM2Config {
 }
 
 impl TryFrom<&TPM2Config> for TPMPolicyStep {
-    type Error = PinError;
+    type Error = Error;
 
-    fn try_from(cfg: &TPM2Config) -> Result<Self, PinError> {
+    fn try_from(cfg: &TPM2Config) -> Result<Self> {
         if cfg.pcr_ids.is_some() && cfg.policy_pubkey_path.is_some() {
             Ok(TPMPolicyStep::Or([
                 Box::new(TPMPolicyStep::PCRs(
@@ -104,7 +103,7 @@ impl TPM2Config {
         }
     }
 
-    fn normalize(mut self) -> Result<TPM2Config, PinError> {
+    fn normalize(mut self) -> Result<TPM2Config> {
         self.normalize_pcr_ids()?;
         if self.pcr_ids.is_some() && self.pcr_bank.is_none() {
             self.pcr_bank = Some("sha256".to_string());
@@ -133,14 +132,12 @@ impl TPM2Config {
                 || self.policy_path.is_none()
                 || self.policy_ref.is_none())
         {
-            return Err(PinError::Text(
-                "Not all of policy pubkey, path and ref are specified",
-            ));
+            bail!("Not all of policy pubkey, path and ref are specified",);
         }
         Ok(self)
     }
 
-    fn normalize_pcr_ids(&mut self) -> Result<(), PinError> {
+    fn normalize_pcr_ids(&mut self) -> Result<()> {
         // Normalize from array with one string to just string
         if let Some(serde_json::Value::Array(vals)) = &self.pcr_ids {
             if vals.len() == 1 {
@@ -168,21 +165,21 @@ impl TPM2Config {
                             Ok(res) => {
                                 let new = serde_json::Value::Number(res);
                                 if !new.is_u64() {
-                                    return Err("Non-positive string int");
+                                    bail!("Non-positive string int");
                                 }
                                 Ok(new)
                             }
-                            Err(_) => Err("Unparseable string int"),
+                            Err(_) => Err(anyhow!("Unparseable string int")),
                         }
                     }
                     serde_json::Value::Number(n) => {
                         let new = serde_json::Value::Number(n.clone());
                         if !new.is_u64() {
-                            return Err("Non-positive int");
+                            return Err(anyhow!("Non-positive int"));
                         }
                         Ok(new)
                     }
-                    _ => Err("Invalid value in pcr_ids"),
+                    _ => Err(anyhow!("Invalid value in pcr_ids")),
                 })
                 .collect();
             self.pcr_ids = Some(serde_json::Value::Array(newvals?));
@@ -192,7 +189,7 @@ impl TPM2Config {
             None => Ok(()),
             // The normalization above would've caught any non-ints
             Some(serde_json::Value::Array(_)) => Ok(()),
-            _ => Err(PinError::Text("Invalid type")),
+            _ => Err(anyhow!("Invalid type")),
         }
     }
 }
@@ -205,9 +202,7 @@ pub(super) enum ActionMode {
     Help,
 }
 
-pub(super) fn get_mode_and_cfg(
-    args: &[String],
-) -> Result<(ActionMode, Option<TPM2Config>), PinError> {
+pub(super) fn get_mode_and_cfg(args: &[String]) -> Result<(ActionMode, Option<TPM2Config>)> {
     if args.len() > 1 && args[1] == "--summary" {
         return Ok((ActionMode::Summary, None));
     }
@@ -227,10 +222,10 @@ pub(super) fn get_mode_and_cfg(
         } else if args[1] == "decrypt" {
             (ActionMode::Decrypt, None)
         } else {
-            return Err(PinError::NoCommand);
+            bail!("No command specified");
         }
     } else {
-        return Err(PinError::NoCommand);
+        bail!("No command specified");
     };
 
     let cfg: Option<TPM2Config> = match cfgstr {
