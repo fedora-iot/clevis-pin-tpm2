@@ -35,10 +35,6 @@ jobs:
       - name: Remove clevis-pin-tpm2
         run: |
             dnf erase -y clevis-pin-tpm2
-      - name: Grab newer copies of the clevis in-tree TPM2 pin
-        run: |
-            curl https://raw.githubusercontent.com/latchset/clevis/master/src/pins/tpm2/clevis-encrypt-tpm2 -o /usr/bin/clevis-encrypt-tpm2
-            curl https://raw.githubusercontent.com/latchset/clevis/master/src/pins/tpm2/clevis-decrypt-tpm2 -o /usr/bin/clevis-decrypt-tpm2
       - name: Build
         run: cargo build
       - name: Start swtpm
@@ -58,7 +54,7 @@ jobs:
                 --daemon
       - name: Run integration tests
         run: |
-            TCTI=swtpm: cargo test -- --nocapture
+            TCTI=swtpm: SKIP_CLEVIS=true cargo test -- --nocapture
       - name: Run policy tests
         run: |
             # TCTI=swtpm: ./tests/test_policy

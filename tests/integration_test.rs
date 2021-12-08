@@ -120,20 +120,23 @@ fn generate_decrypt_clevis() -> DecryptFunc {
 const INPUT: &str = "some-static-content";
 
 const FAIL_FAST: Option<&'static str> = option_env!("FAIL_FAST");
+const SKIP_CLEVIS: Option<&'static str> = option_env!("SKIP_CLEVIS");
 
 // Testing against clevis requires https://github.com/latchset/clevis/commit/c6fc63fc055c18927decc7bcaa07821d5ae37614
 #[test]
 fn pcr_tests() {
-    let encrypters = vec![
+    let mut encrypters = vec![
         generate_encrypt_us(false),
         generate_encrypt_us(true),
-        generate_encrypt_clevis(),
     ];
-    let decrypters = vec![
+    let mut decrypters = vec![
         generate_decrypt_us(false),
         generate_decrypt_us(true),
-        generate_decrypt_clevis(),
     ];
+    if SKIP_CLEVIS.is_none() {
+        encrypters.push(generate_encrypt_clevis());
+        decrypters.push(generate_decrypt_clevis());
+    }
 
     let mut failed: u64 = 0;
 
