@@ -21,6 +21,8 @@ jobs:
                 tpm2-tss-devel \
                 swtpm swtpm-tools \
                 rust cargo clippy
+      - name: Build
+        run: cargo build
       - name: Start swtpm
         run: |
             mkdir /tmp/tpmdir
