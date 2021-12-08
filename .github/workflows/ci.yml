@@ -57,6 +57,6 @@ jobs:
             TCTI=swtpm: SKIP_CLEVIS=true cargo test -- --nocapture
       - name: Run policy tests
         run: |
-            # TCTI=swtpm: ./tests/test_policy
+            TCTI=swtpm: ./tests/test_policy
       - name: Run clippy
         run: cargo clippy -- -D warnings

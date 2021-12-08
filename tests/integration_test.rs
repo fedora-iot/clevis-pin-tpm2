@@ -125,14 +125,8 @@ const SKIP_CLEVIS: Option<&'static str> = option_env!("SKIP_CLEVIS");
 // Testing against clevis requires https://github.com/latchset/clevis/commit/c6fc63fc055c18927decc7bcaa07821d5ae37614
 #[test]
 fn pcr_tests() {
-    let mut encrypters = vec![
-        generate_encrypt_us(false),
-        generate_encrypt_us(true),
-    ];
-    let mut decrypters = vec![
-        generate_decrypt_us(false),
-        generate_decrypt_us(true),
-    ];
+    let mut encrypters = vec![generate_encrypt_us(false), generate_encrypt_us(true)];
+    let mut decrypters = vec![generate_decrypt_us(false), generate_decrypt_us(true)];
     if SKIP_CLEVIS.is_none() {
         encrypters.push(generate_encrypt_clevis());
         decrypters.push(generate_decrypt_clevis());
