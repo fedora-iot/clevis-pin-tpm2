@@ -33,7 +33,7 @@ fn perform_encrypt(cfg: TPM2Config, input: Vec<u8>) -> Result<()> {
         None => "ecc",
         Some(key_type) => key_type,
     };
-    let key_public = tpm_objects::get_key_public(&key_type, cfg.get_name_hash_alg())?;
+    let key_public = tpm_objects::get_key_public(key_type, cfg.get_name_hash_alg())?;
 
     let mut ctx = utils::get_tpm2_ctx()?;
     let key_handle = utils::get_tpm2_primary_key(&mut ctx, &key_public)?;
@@ -275,8 +275,14 @@ fn main() -> Result<()> {
     };
 
     match mode {
-        cli::ActionMode::Summary => return Ok(print_summary()),
-        cli::ActionMode::Help => return Ok(print_help()),
+        cli::ActionMode::Summary => {
+            print_summary();
+            return Ok(());
+        }
+        cli::ActionMode::Help => {
+            print_help();
+            return Ok(());
+        }
         _ => {}
     };
 
