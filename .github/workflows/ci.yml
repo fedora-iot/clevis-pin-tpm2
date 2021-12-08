@@ -1,0 +1,45 @@
+name: Continuous Integration
+on: [push, pull_request]
+jobs:
+  formatting:
+    name: Check formatting
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+  tests:
+    name: Perform tests
+    runs-on: ubuntu-latest
+    container: fedora:latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: Install dependencies
+        run: |
+            dnf install -y \
+                tpm2-tss-devel \
+                swtpm swtpm-tools \
+                rust cargo clippy
+      - name: Start swtpm
+        run: |
+            mkdir /tmp/tpmdir
+            swtpm_setup --tpm2 \
+                --tpmstate /tmp/tpmdir \
+                --createek --decryption --create-ek-cert \
+                --create-platform-cert \
+                --display
+            swtpm socket --tpm2 \
+                --tpmstate dir=/tmp/tpmdir \
+                --flags startup-clear \
+                --ctrl type=tcp,port=2322 \
+                --server type=tcp,port=2321 \
+                --daemon
+      - name: Run PCR tests
+        run: |
+            TCTI=swtpm: ./tests/test_pcr
+      - name: Run policy tests
+        run: |
+            TCTI=swtpm: ./tests/test_policy
+      - name: Run clippy
+        run: cargo clippy -- -D warnings
