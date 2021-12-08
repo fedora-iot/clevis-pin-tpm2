@@ -1,5 +1,6 @@
 use std::convert::TryFrom;
 
+use anyhow::{anyhow, bail, Result};
 use tss_esapi::attributes::object::ObjectAttributesBuilder;
 use tss_esapi::constants::tss as tss_constants;
 use tss_esapi::interface_types::ecc::EccCurve;
@@ -12,12 +13,10 @@ type Sizedu = u64;
 #[cfg(target_pointer_width = "32")]
 type Sizedu = u32;
 
-use crate::PinError;
-
 pub(super) fn get_key_public(
     key_type: &str,
     name_alg: HashingAlgorithm,
-) -> Result<tss_esapi::tss2_esys::TPM2B_PUBLIC, PinError> {
+) -> Result<tss_esapi::tss2_esys::TPM2B_PUBLIC> {
     match key_type {
         "ecc" => Ok(create_restricted_ecc_public()),
         "rsa" => Ok(tss_esapi::utils::create_restricted_decryption_rsa_public(
@@ -25,8 +24,9 @@ pub(super) fn get_key_public(
             2048,
             0,
         )?),
-        _ => Err(PinError::Text("Unsupported key type used")),
-    }.map(|mut public| {
+        _ => Err(anyhow!("Unsupported key type used")),
+    }
+    .map(|mut public| {
         public.publicArea.nameAlg = name_alg.into();
         public
     })
@@ -34,7 +34,7 @@ pub(super) fn get_key_public(
 
 pub(super) fn create_tpm2b_public_sealed_object(
     policy: Option<Digest>,
-) -> Result<tss_esapi::tss2_esys::TPM2B_PUBLIC, PinError> {
+) -> Result<tss_esapi::tss2_esys::TPM2B_PUBLIC> {
     let mut object_attributes = ObjectAttributesBuilder::new()
         .with_fixed_tpm(true)
         .with_fixed_parent(true)
@@ -65,9 +65,7 @@ pub(super) fn create_tpm2b_public_sealed_object(
     })
 }
 
-pub(super) fn get_tpm2b_public(
-    val: tss_esapi::tss2_esys::TPM2B_PUBLIC,
-) -> Result<Vec<u8>, PinError> {
+pub(super) fn get_tpm2b_public(val: tss_esapi::tss2_esys::TPM2B_PUBLIC) -> Result<Vec<u8>> {
     let mut offset = 0 as Sizedu;
     let mut resp = Vec::with_capacity((val.size + 4) as usize);
 
@@ -79,7 +77,7 @@ pub(super) fn get_tpm2b_public(
             &mut offset,
         );
         if res != 0 {
-            return Err(PinError::Text("Marshalling tpm2b_public failed"));
+            bail!("Marshalling tpm2b_public failed");
         }
         resp.set_len(offset as usize);
     }
@@ -87,9 +85,7 @@ pub(super) fn get_tpm2b_public(
     Ok(resp)
 }
 
-pub(super) fn get_tpm2b_private(
-    val: tss_esapi::tss2_esys::TPM2B_PRIVATE,
-) -> Result<Vec<u8>, PinError> {
+pub(super) fn get_tpm2b_private(val: tss_esapi::tss2_esys::TPM2B_PRIVATE) -> Result<Vec<u8>> {
     let mut offset = 0 as Sizedu;
     let mut resp = Vec::with_capacity((val.size + 4) as usize);
 
@@ -101,7 +97,7 @@ pub(super) fn get_tpm2b_private(
             &mut offset,
         );
         if res != 0 {
-            return Err(PinError::Text("Marshalling tpm2b_private failed"));
+            bail!("Marshalling tpm2b_private failed");
         }
         resp.set_len(offset as usize);
     }
@@ -109,9 +105,7 @@ pub(super) fn get_tpm2b_private(
     Ok(resp)
 }
 
-pub(super) fn build_tpm2b_private(
-    val: &[u8],
-) -> Result<tss_esapi::tss2_esys::TPM2B_PRIVATE, PinError> {
+pub(super) fn build_tpm2b_private(val: &[u8]) -> Result<tss_esapi::tss2_esys::TPM2B_PRIVATE> {
     let mut resp = tss_esapi::tss2_esys::TPM2B_PRIVATE::default();
     let mut offset = 0 as Sizedu;
 
@@ -123,16 +117,14 @@ pub(super) fn build_tpm2b_private(
             &mut resp,
         );
         if res != 0 {
-            return Err(PinError::Text("Unmarshalling tpm2b_private failed"));
+            bail!("Unmarshalling tpm2b_private failed");
         }
     }
 
     Ok(resp)
 }
 
-pub(super) fn build_tpm2b_public(
-    val: &[u8],
-) -> Result<tss_esapi::tss2_esys::TPM2B_PUBLIC, PinError> {
+pub(super) fn build_tpm2b_public(val: &[u8]) -> Result<tss_esapi::tss2_esys::TPM2B_PUBLIC> {
     let mut resp = tss_esapi::tss2_esys::TPM2B_PUBLIC::default();
     let mut offset = 0 as Sizedu;
 
@@ -144,7 +136,7 @@ pub(super) fn build_tpm2b_public(
             &mut resp,
         );
         if res != 0 {
-            return Err(PinError::Text("Unmarshalling tpm2b_public failed"));
+            bail!("Unmarshalling tpm2b_public failed");
         }
     }
 
