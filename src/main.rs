@@ -216,7 +216,8 @@ fn perform_decrypt(input: Vec<u8>) -> Result<()> {
     let unsealed = ctx.execute_with_session(policy_session, |ctx| ctx.unseal(key.into()))?;
     let unsealed = &unsealed.value();
     let mut jwk = josekit::jwk::Jwk::from_bytes(unsealed).context("Error unmarshaling JWK")?;
-    jwk.set_algorithm(Dir.name());
+    jwk.set_parameter("alg", None)
+        .context("Error removing the alg parameter")?;
     let decrypter = Dir
         .decrypter_from_jwk(&jwk)
         .context("Error creating decrypter")?;
