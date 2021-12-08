@@ -35,6 +35,10 @@ jobs:
       - name: Remove clevis-pin-tpm2
         run: |
             dnf erase -y clevis-pin-tpm2
+      - name: Grab newer copies of the clevis in-tree TPM2 pin
+        run: |
+            curl https://raw.githubusercontent.com/latchset/clevis/master/src/pins/tpm2/clevis-encrypt-tpm2 -o /usr/bin/clevis-encrypt-tpm2
+            curl https://raw.githubusercontent.com/latchset/clevis/master/src/pins/tpm2/clevis-decrypt-tpm2 -o /usr/bin/clevis-decrypt-tpm2
       - name: Build
         run: cargo build
       - name: Start swtpm
@@ -44,6 +48,7 @@ jobs:
                 --tpmstate /tmp/tpmdir \
                 --createek --decryption --create-ek-cert \
                 --create-platform-cert \
+                --pcr-banks sha1,sha256 \
                 --display
             swtpm socket --tpm2 \
                 --tpmstate dir=/tmp/tpmdir \
@@ -51,11 +56,11 @@ jobs:
                 --ctrl type=tcp,port=2322 \
                 --server type=tcp,port=2321 \
                 --daemon
-      - name: Run PCR tests
+      - name: Run integration tests
         run: |
-            TCTI=swtpm: ./tests/test_pcr
+            TCTI=swtpm: cargo test -- --nocapture
       - name: Run policy tests
         run: |
-            TCTI=swtpm: ./tests/test_policy
+            # TCTI=swtpm: ./tests/test_policy
       - name: Run clippy
         run: cargo clippy -- -D warnings
