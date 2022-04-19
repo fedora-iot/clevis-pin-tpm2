@@ -26,7 +26,7 @@ fn perform_encrypt(cfg: TPM2Config, input: Vec<u8>) -> Result<()> {
     let key_public = tpm_objects::get_key_public(key_type, cfg.get_name_hash_alg())?;
 
     let mut ctx = utils::get_tpm2_ctx()?;
-    let key_handle = utils::get_tpm2_primary_key(&mut ctx, &key_public)?;
+    let key_handle = utils::get_tpm2_primary_key(&mut ctx, key_public)?;
 
     let policy_runner: TPMPolicyStep = TPMPolicyStep::try_from(&cfg)?;
 
@@ -42,15 +42,15 @@ fn perform_encrypt(cfg: TPM2Config, input: Vec<u8>) -> Result<()> {
     jwk.set_key_operations(vec!["encrypt", "decrypt"]);
     let jwk_str = serde_json::to_string(&jwk.as_ref())?;
 
-    let public = tpm_objects::create_tpm2b_public_sealed_object(policy_digest)?;
+    let public = tpm_objects::create_tpm2b_public_sealed_object(policy_digest)?.try_into()?;
     let jwk_str = SensitiveData::try_from(jwk_str.as_bytes().to_vec())?;
     let jwk_result = ctx.execute_with_nullauth_session(|ctx| {
-        ctx.create(key_handle, &public, None, Some(&jwk_str), None, None)
+        ctx.create(key_handle, public, None, Some(jwk_str), None, None)
     })?;
 
     let jwk_priv = tpm_objects::get_tpm2b_private(jwk_result.out_private.into())?;
 
-    let jwk_pub = tpm_objects::get_tpm2b_public(jwk_result.out_public)?;
+    let jwk_pub = tpm_objects::get_tpm2b_public(jwk_result.out_public.try_into()?)?;
 
     let private_hdr = ClevisInner {
         pin: pin_type.to_string(),
@@ -187,7 +187,7 @@ fn perform_decrypt(input: Vec<u8>) -> Result<()> {
         bail!("JWE pin mismatch");
     }
 
-    let jwkpub = tpm_objects::build_tpm2b_public(&hdr_clevis.tpm2.jwk_pub)?;
+    let jwkpub = tpm_objects::build_tpm2b_public(&hdr_clevis.tpm2.jwk_pub)?.try_into()?;
     let jwkpriv = tpm_objects::build_tpm2b_private(&hdr_clevis.tpm2.jwk_priv)?;
 
     let policy = TPMPolicyStep::try_from(&hdr_clevis.tpm2)?;
@@ -196,7 +196,7 @@ fn perform_decrypt(input: Vec<u8>) -> Result<()> {
     let key_public = tpm_objects::get_key_public(hdr_clevis.tpm2.key.as_str(), name_alg)?;
 
     let mut ctx = utils::get_tpm2_ctx()?;
-    let key_handle = utils::get_tpm2_primary_key(&mut ctx, &key_public)?;
+    let key_handle = utils::get_tpm2_primary_key(&mut ctx, key_public)?;
 
     let key =
         ctx.execute_with_nullauth_session(|ctx| ctx.load(key_handle, jwkpriv.try_into()?, jwkpub))?;

@@ -8,6 +8,7 @@ use tpm2_policy::{PublicKey, SignedPolicyList, TPMPolicyStep};
 use tss_esapi::{
     handles::KeyHandle,
     interface_types::{algorithm::HashingAlgorithm, resource_handles::Hierarchy},
+    structures::Public,
     Context, Tcti,
 };
 
@@ -95,10 +96,7 @@ pub(crate) fn get_tpm2_ctx() -> Result<tss_esapi::Context> {
     Context::new(tcti).context("Error initializing TPM2 context")
 }
 
-pub(crate) fn get_tpm2_primary_key(
-    ctx: &mut Context,
-    pub_template: &tss_esapi::tss2_esys::TPM2B_PUBLIC,
-) -> Result<KeyHandle> {
+pub(crate) fn get_tpm2_primary_key(ctx: &mut Context, pub_template: Public) -> Result<KeyHandle> {
     ctx.execute_with_nullauth_session(|ctx| {
         ctx.create_primary(Hierarchy::Owner, pub_template, None, None, None, None)
             .map(|r| r.key_handle)
