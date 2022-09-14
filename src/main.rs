@@ -227,15 +227,16 @@ fn print_summary() {
 fn print_help() {
     eprintln!(
         "
-Usage: clevis encrypt tpm2 CONFIG < PLAINTEXT > JWE
+Usage (encryption): clevis encrypt tpm2 CONFIG < PLAINTEXT > JWE
+Usage (decryption): clevis decrypt tpm2 CONFIG < JWE > PLAINTEXT
 
-Encrypts using a TPM2.0 chip binding policy
+Encrypts or decrypts using a TPM2.0 chip binding policy
 
 This command uses the following configuration properties:
 
   hash: <string>  Hash algorithm used in the computation of the object name (default: sha256)
 
-  key: <string>  Algorithm type for the generated key (options: eecc, rsa; default: ecc)
+  key: <string>  Algorithm type for the generated key (options: ecc, rsa; default: ecc)
 
   pcr_bank: <string>  PCR algorithm bank to use for policy (default: sha256)
 
