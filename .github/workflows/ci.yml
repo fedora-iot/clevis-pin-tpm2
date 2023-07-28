@@ -31,7 +31,7 @@ jobs:
                 tpm2-tss-devel clevis \
                 swtpm swtpm-tools \
                 rust cargo clippy \
-                golang
+                golang clang-devel
       - name: Remove clevis-pin-tpm2
         run: |
             dnf erase -y clevis-pin-tpm2
