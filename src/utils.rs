@@ -3,6 +3,7 @@ use std::fs;
 use std::str::FromStr;
 
 use anyhow::{Context as anyhow_context, Result};
+use base64::Engine;
 use serde::Deserialize;
 use tpm2_policy::{PublicKey, SignedPolicyList, TPMPolicyStep};
 use tss_esapi::{
@@ -68,7 +69,7 @@ pub(crate) fn serialize_as_base64_url_no_pad<S>(
 where
     S: serde::Serializer,
 {
-    serializer.serialize_str(&base64::encode_config(bytes, base64::URL_SAFE_NO_PAD))
+    serializer.serialize_str(&base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes))
 }
 
 pub(crate) fn deserialize_as_base64_url_no_pad<'de, D>(deserializer: D) -> Result<Vec<u8>, D::Error>
@@ -76,7 +77,9 @@ where
     D: serde::Deserializer<'de>,
 {
     String::deserialize(deserializer).and_then(|string| {
-        base64::decode_config(&string, base64::URL_SAFE_NO_PAD).map_err(serde::de::Error::custom)
+        base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .decode(string)
+            .map_err(serde::de::Error::custom)
     })
 }
 
