@@ -177,7 +177,10 @@ struct ClevisInner {
 }
 
 fn perform_decrypt(input: Vec<u8>) -> Result<()> {
-    let input = String::from_utf8(input).context("Error reading input")?;
+    let input = String::from_utf8(input)
+        .context("Error reading input")?
+        .trim()
+        .to_string();
     let hdr = josekit::jwt::decode_header(&input).context("Error decoding header")?;
     let hdr_clevis = hdr.claim("clevis").context("Error getting clevis claim")?;
     let hdr_clevis: ClevisInner =

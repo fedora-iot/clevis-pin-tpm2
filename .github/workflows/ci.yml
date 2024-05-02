@@ -56,6 +56,8 @@ jobs:
       - name: Run integration tests
         run: |
             TCTI=swtpm: SKIP_CLEVIS=true cargo test -- --nocapture
+            echo "### Shell integration tests" >&2
+            TCTI=swtpm: SKIP_CLEVIS=true ./tests/integration-test.sh
       - name: Run policy tests
         run: |
             TCTI=swtpm: ./tests/test_policy
