@@ -31,7 +31,8 @@ jobs:
                 tpm2-tss-devel clevis \
                 swtpm swtpm-tools \
                 rust cargo clippy \
-                golang clang-devel
+                golang clang-devel \
+                git-core
       - name: Remove clevis-pin-tpm2
         run: |
             rm -f /usr/bin/clevis-pin-tpm2 /usr/bin/clevis-*-tpm2plus
