@@ -5,7 +5,7 @@ jobs:
     name: Check formatting
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
       - name: Check formatting
         run: cargo fmt --all -- --check
 
@@ -17,11 +17,11 @@ jobs:
       run:
         working-directory: ./clevis-pin-tpm2
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
         with:
           path: clevis-pin-tpm2
       - name: Check out the policy signtool
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
         with:
           path: clevis-pin-tpm2-signtool
           repository: puiterwijk/clevis-pin-tpm2-signtool
@@ -31,10 +31,11 @@ jobs:
                 tpm2-tss-devel clevis \
                 swtpm swtpm-tools \
                 rust cargo clippy \
-                golang clang-devel
+                golang clang-devel \
+                git-core
       - name: Remove clevis-pin-tpm2
         run: |
-            dnf erase -y clevis-pin-tpm2
+            rm -f /usr/bin/clevis-pin-tpm2 /usr/bin/clevis-*-tpm2plus
       - name: Build
         run: cargo build
       - name: Start swtpm
